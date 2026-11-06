@@ -1,0 +1,1864 @@
+// ST Reader — AGPL-3.0
+// 阅读器主控（T21/T22/T23a）：全屏覆盖层 #stcr_root、正文 #stcr_chat（D12）。
+// 只读（D02）：只调 03 §5 的读取接口；候选/思维链/进度/划线/收藏都是阅读器自己的状态，绝不写回 ST。
+
+import { getCurrentChatKey, openChat, parseChatKey } from '../core/chatSource.js';
+import { maskHtmlString } from '../core/cardExport.js';
+import { initFormatter } from '../core/formatter.js';
+import { store } from '../core/store.js';
+import { flushMirror, getMirrorStatus, mirrorNow, onMirrorStatus, restoreFromServer, whenStarted } from '../core/backupService.js';
+import { getVersion } from '../core/updateService.js';
+import { createPanel } from './annotationsPanel.js';
+import { backupStatus, describeStoreError, exportBackup, pickAndImport } from './backup.js';
+import { annotationToFloor, createPieceCache, MAX_CARD_FLOORS, selectionToFloors, wholeFloor } from './cardPieces.js';
+import { createCardStudio } from './cardStudio.js';
+import { copyText, h, iconButton, isTypingTarget, toast } from './dom.js';
+import { isFavoriteChat, loadFavoriteChats, onFavoriteChatsChange, resetFavoriteChats, toggleFavoriteChat } from './chatFavorites.js';
+import { createDrawer } from './drawer.js';
+import { createHtmlManager } from './htmlBlocks.js';
+import { createHtmlShot } from './htmlShot.js';
+import { buildFloor, buildSwipeControl, fillFloor, floorFault, floorPlainText, syncBookmarkMarks } from './floorToolbar.js';
+import { effectivePrefs, faultReport, foldRuns, followPlacement, formatStamp, isFolded, mirrorStatusText, parseJumpInput, pickSwipe, progressText, restoreSummary, swipePreviews } from './logic.js';
+import { createMarks, highlightSupported } from './marks.js';
+import { flushProgress, getPrefs, getProgress, lastRead, loadPrefs, onPrefsChange, reloadPrefs, rememberSwipe, setPrefs, setReadPosition } from './prefs.js';
+import { createSelectionUi } from './selectionPopover.js';
+import { hasRedaction, redactString, setRedactState, visibleText } from './redact.js';
+import { createSettingsBar } from './settingsBar.js';
+import { createRulesManager } from './rulesUi.js';
+import { createDocPanel } from './docPanel.js';
+import { createVersionRow, maybeShowWhatsNew } from './updateUi.js';
+
+const PAGE_SIZE = 30;      // 每批楼数，与 core 默认一致（03 §4.5）
+const MAX_PAGES = 4;       // DOM 里同时最多保留几批，其余释放（NF2）
+const EDGE_SCREENS = 1.5;  // 距离边缘不到 1.5 屏就接上前/后一批
+const WIDE = 1000;         // ≥1000px 抽屉/面板可以钉住（D13）
+
+// 阅读器里的这些事件不许冒泡到 document：ST 在 document 上挂了 .mes/.mes_text/.avatar/思维链的委托点击，
+// 以及 ←/→ 切换真实聊天候选（最后一个候选上会触发生成 = 写聊天）的全局按键。见 02 §9.1。
+const CONTAINED_EVENTS = ['click', 'dblclick', 'auxclick', 'contextmenu', 'mousedown', 'mouseup', 'pointerdown', 'pointerup',
+    'touchstart', 'touchend', 'input', 'change', 'paste', 'focusin', 'focusout',
+    'swiped', 'swiped-left', 'swiped-right', 'swiped-up', 'swiped-down'];
+const KEY_EVENTS = ['keydown', 'keyup', 'keypress'];
+
+/** 扩展目录名随用户怎么装而变：从本文件地址推出 third-party/<目录>。 */
+const EXTENSION_ID = new URL('../..', import.meta.url).pathname.replace(/^\/scripts\/extensions\//, '').replace(/\/$/, '');
+const thumb = file => `/thumbnail?type=avatar&file=${encodeURIComponent(file)}`;
+
+let S = null; // 打开期间的会话状态；关闭即整体丢弃
+/** 本页已经提示过"有新内容"的聊天（D28：同一聊天同一页面会话只提示一次；重新加载成功后清掉，下次变化再提示）。 */
+const staleNoticed = new Set();
+/** 启动时从 ST 服务器恢复的结果，第一次打开阅读器时提示一次（T70）。 */
+let restoreNotice = null, restoreNoticeTaken = false;
+/** 浏览器回归用的故障注入（uiBrowser.test.js）：'open' / 'close' 时在对应流程中途抛错一次。正式使用不会设置。 */
+let testFault = null;
+export function injectReaderFault(stage) { testFault = stage; }
+function maybeFault(stage) {
+    if (testFault !== stage) return;
+    testFault = null;
+    throw new Error(`[st-reader] 测试注入的${stage === 'open' ? '打开' : '关闭'}故障`);
+}
+
+export const isReaderOpen = () => S !== null;
+const wide = () => innerWidth >= WIDE;
+const say = message => { if (S) toast(S.root, message); };
+
+/**
+ * 打开阅读器（入口：魔杖菜单、/reader）。已打开时只切换到要求的页签/聊天。
+ * @param {{tab?:'recent'|'owners'|'favorites'|'current', chatKey?:string}} [options]
+ */
+export async function openReader({ tab, chatKey } = {}) {
+    if (S) {
+        if (chatKey) loadChat(chatKey);
+        if (tab) S.drawer.open(tab);
+        return;
+    }
+    await initFormatter();
+    // T70：启动时的服务器合并要先做完（最多等 5 秒），恢复回来的阅读设置才读得到
+    const started = whenStarted();
+    if (started) {
+        const result = await Promise.race([started, new Promise(resolve => setTimeout(() => resolve(null), 5000))]);
+        if (!restoreNoticeTaken && result?.restored) { restoreNotice = restoreSummary(result.restored); restoreNoticeTaken = true; }
+    }
+    await loadPrefs();
+    const html = await SillyTavern.getContext().renderExtensionTemplateAsync(`${EXTENSION_ID}/src/ui/templates`, 'reader');
+    if (S) return; // 等模板期间又被打开过一次
+    const holder = document.createElement('div');
+    holder.innerHTML = html;
+    const root = holder.querySelector('#stcr_root');
+    if (!root) throw new Error('阅读器模板缺少 #stcr_root');
+
+    const session = {
+        root, scroller: root.querySelector('.stcr-scroll'), chat: root.querySelector('#stcr_chat'), main: root.querySelector('.stcr-main'),
+        stateBox: root.querySelector('.stcr-state'), progressBtn: root.querySelector('.stcr-progress'),
+        progressLine: root.querySelector('.stcr-progress-line > span'), topPercent: root.querySelector('.stcr-top-percent'),
+        titleOwner: root.querySelector('.stcr-title-owner'), titleFile: root.querySelector('.stcr-title-file'),
+        panelBtn: root.querySelector('.stcr-panel-btn'), favBtn: root.querySelector('.stcr-chat-fav'), reloadBtn: root.querySelector('.stcr-reload-btn'), redactBadge: root.querySelector('.stcr-redact-badge'),
+        handle: null, chatKey: null, owner: '', token: 0, controller: null,
+        firstPage: -1, lastPage: -1, swipeView: new Map(), reasoning: new Map(), hoverIndex: null,
+        userAvatar: '', restoreFocus: document.activeElement, cleanup: [], hold: null, popover: null, popoverDismiss: null,
+        chromeTimer: null, wheelAt: 0, wheelSum: 0, statusTimer: null, redact: null,
+        prebuilt: new Map(), renderVersion: 0, prebuildJob: 0, // T82：空闲时先建好的前后批
+        banner: null, staleOff: null, reloading: false, restoring: false,
+    };
+    S = session;
+    session.marks = createMarks({
+        getHandle: () => (S === session ? session.handle : null),
+        getChatKey: () => (S === session && session.handle ? session.chatKey : null),
+        getTitle: () => [session.owner, session.handle?.title].filter(Boolean).join(' · '),
+        onChange: () => onMarksChange(session),
+    });
+    session.drawer = createDrawer({
+        onPick: (key, target) => {
+            if (target && key === session.chatKey && session.handle) jumpTo(target.index, { swipe: target.swipe });
+            else loadChat(key, target ?? {});
+            if (!getPrefs().drawerPinned || !wide()) session.drawer.close();
+        },
+        getActiveKey: () => S?.chatKey ?? null,
+        isPinned: () => getPrefs().drawerPinned,
+        onPinChange: pinned => setPrefs({ drawerPinned: pinned }),
+        toast: say,
+    });
+    session.panel = createPanel({
+        marks: session.marks,
+        getHandle: () => session.handle,
+        getChatKey: () => (session.handle ? session.chatKey : null),
+        onJump: target => jumpToMark(target),
+        onCard: record => openCardFromNote(record),
+        isPinned: () => getPrefs().panelPinned,
+        onPinChange: pinned => setPrefs({ panelPinned: pinned }),
+        onBackupHint: () => { if (!getPrefs().panelPinned || !wide()) session.panel.close(); session.settings.openMore(); },
+        toast: say,
+        confirm: (message, ok) => confirmDialog(message, ok),
+    });
+    session.docPanel = createDocPanel({ root });
+    session.settings = createSettingsBar({ onExport: () => doExport(), onImport: () => doImport(), onMirror: () => doMirror(), onRestore: () => doRestore(), onManageRules: () => openRulesSheet(session),
+        versionRow: createVersionRow({ docPanel: session.docPanel }) });
+    session.selUi = createSelectionUi({
+        root, marks: session.marks, toast: say,
+        onCard: range => openCardFromSelection(range),
+        getChatKey: () => (session.handle ? session.chatKey : null),
+        getAutoNames: () => (session.handle ? [session.handle.header.userName, session.handle.header.characterName].filter(Boolean) : []),
+        setPopover: (el, options) => setPopover(el, options),
+        closePopover: options => closePopover(session, options),
+    });
+    session.studio = createCardStudio({
+        root, toast: say, getDirection: () => getPrefs().direction, confirm: (message, ok) => confirmDialog(message, ok),
+        onClose: () => {
+            if (S !== session) return;
+            session.scroller.focus({ preventScroll: true });
+            // 工作台里可能改了屏蔽词 / 规则：脱敏显示开着就重读并重排
+            if (getPrefs().redact) loadRedaction(session).then(() => { if (S === session) { refreshSideTexts(session); rerender(captureAnchor()); } });
+        },
+    });
+    // HTML 楼层（T44b）：楼内沙箱渲染 + 截图分享
+    session.html = createHtmlManager({
+        scroller: session.scroller, chat: session.chat, toast: say, isPaged: () => isPaged(),
+        defaults: () => { const p = getPrefs(); return { mode: p.htmlMode, network: p.htmlNetwork, width: p.htmlWidth }; },
+        rememberWidth: width => setPrefs({ htmlWidth: width }),
+        // 脱敏显示开着：沙箱里跑的也是换过词的 HTML（只换文字，不碰标签和属性）
+        prepare: (html, where) => {
+            if (!getPrefs().redact) return html;
+            // 脱敏开着却没读到屏蔽词 / 规则：不能当成"没有要换的"去渲染原文（I033）
+            if (!session.redact) throw new Error('屏蔽词或替换规则没读出来');
+            const data = session.redact;
+            if (!hasRedaction({ ...data, names: redactNames(session, where.model) })) return html;
+            return maskHtmlString(html, { ...htmlMaskBase(session, where.model), maskWords: data.words, rules: data.rules, autoReplaceNames: getPrefs().autoNames, applyReplaceRules: true });
+        },
+    });
+    session.htmlShot = createHtmlShot({
+        root, toast: say, confirm: (message, ok) => confirmDialog(message, ok),
+        maskOptions: (where, flags) => htmlMaskOptions(session, where.model, flags),
+        getChatKey: () => (session.handle ? session.chatKey : null),
+        autoNames: () => (session.handle ? [session.handle.header.userName, session.handle.header.characterName].filter(Boolean) : []),
+        onClose: ({ changed } = {}) => {
+            if (S !== session) return;
+            session.scroller.focus({ preventScroll: true });
+            // 截图窗口里改了屏蔽词 / 规则：脱敏显示开着就重读并重排（与卡片工作台相同）
+            if (changed && getPrefs().redact) loadRedaction(session).then(() => { if (S === session) { refreshSideTexts(session); rerender(captureAnchor()); } });
+        },
+    });
+    session.follow = h('div', { class: 'stcr-follow', hidden: true, role: 'toolbar', 'aria-label': '当前这一楼', 'data-side': 'right' });
+    root.querySelector('.stcr-body').prepend(session.drawer.el);
+    root.querySelector('.stcr-body').append(session.panel.el);
+    session.main.append(session.follow);
+    root.append(session.settings.panel, session.settings.fab);
+
+    try { session.userAvatar = (await import('/scripts/personas.js')).user_avatar ?? ''; } catch { /* 没有头像也能读 */ }
+    if (S !== session) return;
+
+    wireEvents(session);
+    if (getPrefs().redact) await loadRedaction(session);
+    if (S !== session) return;
+    applyPrefs(getPrefs());
+    session.cleanup.push(onPrefsChange(onPrefs));
+    session.cleanup.push(onFavoriteChatsChange(chatKey => { if (S === session && chatKey === session.chatKey) syncChatFav(session); }));
+    session.cleanup.push(followHostWidth(root));
+    session.cleanup.push(onMirrorStatus(() => { if (S === session) showMirrorStatus(session); }));
+    session.cleanup.push(muteHostMessageStyles(root, () => { if (S === session) closeReader(); }));
+    try {
+        maybeFault('open');
+        document.body.append(root);
+        document.body.classList.add('stcr-reader-open');
+        session.scroller.focus({ preventScroll: true });
+        refreshBackupStatus();
+        if (restoreNotice) { const text = restoreNotice; restoreNotice = null; setTimeout(() => say(text), 300); }
+        if (!highlightSupported()) setTimeout(() => say('这个浏览器太旧，划线能保存但看不到颜色；请升级浏览器。'), 800);
+
+        const current = getCurrentChatKey();
+        if (chatKey) loadChat(chatKey);
+        else if (current && tab !== 'recent') loadChat(current, { index: stVisibleIndex() });
+        else showEmpty();
+        if (tab) session.drawer.open(tab);
+        else if (!chatKey && !current) session.drawer.open('recent');
+        else if (getPrefs().drawerPinned && wide()) session.drawer.open();
+        if (getPrefs().panelPinned && wide()) session.panel.open();
+    } catch (error) {
+        // 打开到一半出错：按关闭流程收回（宿主样式恢复、监听移除），再把错误交给入口提示（D29 ③）
+        if (S === session) closeReader();
+        throw error;
+    }
+    // 更新后第一次打开：弹"本次更新了什么"（T54b）。读不到就不弹，不挡阅读
+    maybeShowWhatsNew(session.docPanel, () => S === session).catch(() => {});
+}
+
+/**
+ * 宿主聊天里楼内自带的 <style>（ST 给选择器加的前缀是 `.mes_text `）也会命中阅读器的楼层：
+ * 例如卡片 CSS 的 `p { background }` 让阅读器整页段落上底色、`text-align: center` 让整页居中（T50/T52 验收）。
+ * 阅读器开着时把这些样式表暂停（只设 HTMLStyleElement.disabled，不删、不改文字、不碰聊天数据），关阅读器时原样恢复。
+ * 宿主聊天被不透明的阅读器盖着，看不出差别。D29：只动 `#chat .mes` 里的 <style>，#chat 外、<head>、主题与扩展的样式一概不碰。
+ * 恢复路径（D29 ③）：正常关闭 / 打开或关闭中途抛错（调用方 try·finally）/ pagehide / 阅读器根节点被移出页面。
+ * 返回的恢复函数可重复调用。onRootLost：根节点被别人移走时通知阅读器收尾。
+ */
+function muteHostMessageStyles(root, onRootLost = () => {}) {
+    const chat = document.getElementById('chat');
+    if (!chat) return () => {};
+    const muted = new Set();
+    let done = false;
+    const mute = () => {
+        for (const style of chat.querySelectorAll('.mes style')) {
+            if (style.disabled || muted.has(style)) continue;
+            style.disabled = true;
+            muted.add(style);
+        }
+    };
+    const unmute = () => {
+        for (const style of muted) style.disabled = false;
+        muted.clear();
+    };
+    mute();
+    // ST 在阅读器开着时也可能重绘聊天（换角色、收到新消息）：新出现的楼内样式同样暂停
+    const mo = new MutationObserver(records => { if (records.some(r => r.addedNodes.length)) mute(); });
+    mo.observe(chat, { childList: true, subtree: true });
+    // 离开页面：先恢复（浏览器可能把页面存进往返缓存）；从往返缓存回来、阅读器还在，就再暂停
+    const onHide = () => unmute();
+    const onShow = event => { if (event.persisted && !done && root.isConnected) mute(); };
+    window.addEventListener('pagehide', onHide, true);
+    window.addEventListener('pageshow', onShow, true);
+    // 阅读器根节点被移出页面（别的脚本清了 body 等）：立即恢复，并让阅读器收尾
+    const bodyMo = new MutationObserver(() => {
+        if (root.isConnected || done) return;
+        restore();
+        try { onRootLost(); } catch (error) { console.error('[st-reader] 根节点被移除后收尾失败：', error); }
+    });
+    bodyMo.observe(document.body, { childList: true });
+    function restore() {
+        if (done) return;
+        done = true;
+        try {
+            mo.disconnect();
+            bodyMo.disconnect();
+            window.removeEventListener('pagehide', onHide, true);
+            window.removeEventListener('pageshow', onShow, true);
+        } finally {
+            unmute();
+        }
+    }
+    return restore;
+}
+
+/**
+ * "跟随 ST"的正文宽度（D27）：量宿主聊天栏（#sheld，没有就 #chat）此刻实际渲染出来多宽，写进 --stcr-host-width。
+ * 不用 --sheldWidth 变量——主题、移动端规则、扩展都可能让实际宽度和它不一样。窗口或 ST 设置变了跟着变。只读，不改宿主。
+ */
+function followHostWidth(root) {
+    const host = document.getElementById('sheld') ?? document.getElementById('chat');
+    if (!host) return () => {};
+    const apply = () => {
+        const width = host.getBoundingClientRect().width;
+        if (width >= 200) root.style.setProperty('--stcr-host-width', `${width}px`);
+        else root.style.removeProperty('--stcr-host-width'); // 宿主被隐藏 / 折叠：退回 ST 的宽度变量
+    };
+    const ro = new ResizeObserver(apply);
+    ro.observe(host);
+    apply();
+    return () => ro.disconnect();
+}
+
+export function closeReader() {
+    if (!S) return;
+    const session = S;
+    try {
+        maybeFault('close');
+        closePopover(session); // 批注输入框点外面=保存，这里同理：先保存再关
+        session.studio.close(); // 先关卡片工作台：它可能借用着这个聊天的句柄
+        session.htmlShot.close();
+        session.docPanel.close();
+        session.html.destroy(); // 所有 HTML 沙箱一起销毁
+        S = null;
+        session.token++;
+        session.controller?.abort();
+        // 进度落盘后把排队的自动备份立刻写掉（T70：关阅读器即 flush）
+        flushProgress().finally(() => flushMirror());
+        session.selUi.hideBubble();
+        session.marks.destroy();
+        session.chat.replaceChildren();
+        session.staleOff?.();
+        session.handle?.close();
+        dropPrebuilt(session);
+        session.handle = null;
+        session.drawer.destroy();
+    } finally {
+        if (S === session) { S = null; session.token++; } // 中途抛错也不留下"关不掉"的半个阅读器
+        // 宿主样式恢复、全局监听移除必须做完（D29 ③）：每项单独兜住，一项失败不连累其他
+        for (const undo of session.cleanup) {
+            try { undo(); } catch (error) { console.error('[st-reader] 关闭收尾失败：', error); }
+        }
+        clearTimeout(session.chromeTimer);
+        clearTimeout(session.statusTimer);
+        session.root.remove();
+        document.body.classList.remove('stcr-reader-open');
+        if (session.restoreFocus instanceof HTMLElement && document.contains(session.restoreFocus)) session.restoreFocus.focus({ preventScroll: true });
+    }
+}
+
+/** ST 主界面此刻看到的第一楼（只读 DOM），"当前"入口据此落点（02 §1.1）。 */
+function stVisibleIndex() {
+    const host = document.getElementById('chat');
+    if (!host) return null;
+    const top = host.getBoundingClientRect().top;
+    for (const mes of host.querySelectorAll(':scope > .mes[mesid]')) {
+        if (mes.getBoundingClientRect().bottom > top + 4) return Number(mes.getAttribute('mesid'));
+    }
+    return null;
+}
+
+/** ST 自己的确认弹窗（<dialog> 顶层显示，盖在阅读器之上）。message 可以是文字或元素。 */
+async function confirmDialog(message, okLabel = '确定') {
+    const { callGenericPopup, POPUP_TYPE, POPUP_RESULT } = SillyTavern.getContext();
+    const content = typeof message === 'string' ? h('p', { class: 'stcr-confirm-text', text: message }) : message;
+    const result = await callGenericPopup(content, POPUP_TYPE.CONFIRM, '', { okButton: okLabel, cancelButton: '取消' });
+    return result === POPUP_RESULT.AFFIRMATIVE;
+}
+
+// ───────────────────────── 事件 ─────────────────────────
+
+function wireEvents(session) {
+    const { root, scroller, chat } = session;
+    // 键盘防火墙：焦点不在阅读器里时（比如落在 body），在 window 捕获阶段就截住，ST 的 document 监听收不到。
+    const guard = event => {
+        if (S !== session) return;
+        const target = event.target;
+        if (target instanceof Node && root.contains(target)) return; // 阅读器内部的由 root 冒泡监听处理
+        // ST 自己的弹窗（确认导入等）照常可用。
+        if (target instanceof Element && target.closest('dialog, .popup, #toast-container')) return;
+        event.stopImmediatePropagation();
+        if (event.type === 'keydown') handleKey(event);
+    };
+    for (const type of KEY_EVENTS) {
+        window.addEventListener(type, guard, true);
+        session.cleanup.push(() => window.removeEventListener(type, guard, true));
+    }
+    for (const type of KEY_EVENTS) root.addEventListener(type, event => {
+        if (type === 'keydown') handleKey(event);
+        if (type === 'keyup' && event.shiftKey) setTimeout(checkSelection, 0); // Shift+方向键选字
+        event.stopPropagation();
+    });
+    // 自己的点击逻辑先跑（注册在前），再统一截断冒泡。
+    root.addEventListener('click', onClick);
+    // 选中文字：松开鼠标/手指后看一眼选区（放到 click 之后，免得刚弹出的浮层被这次点击关掉）
+    root.addEventListener('mouseup', event => { if (chat.contains(event.target)) setTimeout(checkSelection, 0); });
+    root.addEventListener('touchend', event => { if (chat.contains(event.target)) setTimeout(checkSelection, 350); });
+    for (const type of CONTAINED_EVENTS) root.addEventListener(type, event => event.stopPropagation());
+    // 手机上拖动选区把手不会触发 touchend，靠 selectionchange 补一次
+    let selTimer = 0;
+    const onSelChange = () => {
+        if (S !== session || !matchMedia('(pointer: coarse)').matches) return;
+        clearTimeout(selTimer);
+        selTimer = setTimeout(checkSelection, 500);
+    };
+    document.addEventListener('selectionchange', onSelChange);
+    session.cleanup.push(() => { document.removeEventListener('selectionchange', onSelChange); clearTimeout(selTimer); });
+
+    let frame = 0;
+    scroller.addEventListener('scroll', () => {
+        // 选中文字的浮层跟着选区走（选长段要滚动，T23a 验收意见②）；其余贴着按钮的小浮层收起；批注输入框留着
+        const pop = session.popover;
+        if (pop?._stcrFollow) { if (!pop._stcrFollow()) closePopover(session, { cancel: true }); }
+        else if (pop?.matches('.stcr-sel-pop, .stcr-sel-menu, .stcr-swipe-list')) closePopover(session, { cancel: true });
+        session.selUi.hideBubble();
+        if (frame) return;
+        // T82：每帧只看要不要接上 / 释放一批（读三个滚动数，不遍历楼层）；进度和胶囊由 trackVisibleFloors 在跨楼时更新
+        frame = requestAnimationFrame(() => { frame = 0; if (S === session) ensureWindow(); });
+    }, { passive: true });
+    scroller.addEventListener('wheel', onWheel, { passive: false });
+    const letGo = () => { session.hold = null; }; // 人接手滚动，holdAt 放手
+    for (const type of ['wheel', 'touchstart', 'keydown', 'pointerdown']) scroller.addEventListener(type, letGo, { passive: true });
+    chat.addEventListener('mouseover', event => {
+        const mes = event.target.closest?.('.mes[mesid]');
+        if (mes) session.hoverIndex = Number(mes.getAttribute('mesid'));
+        const mark = event.target.closest?.('.stcr-note-mark');
+        if (mark) session.selUi.showBubble(mark);
+    });
+    chat.addEventListener('mouseout', event => { if (event.target.closest?.('.stcr-note-mark')) session.selUi.hideBubble(); });
+    // 分页模式下手机左右滑动翻页（不用来切候选，避免与翻页冲突，02 §3.3）。
+    let touch = null;
+    scroller.addEventListener('touchstart', event => { touch = event.touches.length === 1 ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null; }, { passive: true });
+    scroller.addEventListener('touchend', event => {
+        if (!touch || !isPaged() || getSelection()?.toString()) return;
+        const dx = event.changedTouches[0].clientX - touch.x, dy = event.changedTouches[0].clientY - touch.y;
+        touch = null;
+        if (Math.abs(dx) > 50 && Math.abs(dy) < 40) flip(dx < 0 ? 1 : -1);
+    }, { passive: true });
+    root.addEventListener('mousemove', () => wakeChrome());
+    const onResize = () => { if (S === session) { ensureWindow(); updateProgress(); } };
+    window.addEventListener('resize', onResize);
+    session.cleanup.push(() => window.removeEventListener('resize', onResize));
+    trackVisibleFloors(session);
+}
+
+/**
+ * T82（I020）：看得见的楼由 IntersectionObserver 记着（露出不到 16px 的不算，和 updateProgress 的老规矩一样），
+ * 滚动时不再每帧把 120 楼挨个 getBoundingClientRect。集合一变（跨进 / 跨出一楼），至多每 100ms 更新一次进度和楼层胶囊。
+ * 楼层进出 DOM（接批、释放、换候选重建）由 MutationObserver 跟着 observe / unobserve。
+ * 跳楼、翻页、改设置这些一次性的地方仍直接调 updateProgress()，按老办法当场量，结果不等观察器。
+ */
+function trackVisibleFloors(session) {
+    const visible = new Set();
+    let timer = 0, last = 0;
+    const flush = () => {
+        timer = 0; last = performance.now();
+        if (S !== session || !session.handle?.total) return;
+        let first = null, end = null;
+        for (const el of visible) {
+            if (!el.isConnected) { visible.delete(el); continue; }
+            const index = Number(el.getAttribute('mesid'));
+            if (first === null || index < first.index) first = { el, index };
+            if (end === null || index > end) end = index;
+        }
+        updateProgress(first ? { first: first.index, last: end, top: first.el } : { first: null });
+    };
+    const io = new IntersectionObserver(entries => {
+        for (const entry of entries) entry.isIntersecting ? visible.add(entry.target) : visible.delete(entry.target);
+        if (!timer) timer = setTimeout(flush, Math.max(0, 100 - (performance.now() - last)));
+    }, { root: session.scroller, rootMargin: '-16px 0px -16px 0px' });
+    const isFloor = node => node.nodeType === 1 && node.matches('.mes[mesid]');
+    const mo = new MutationObserver(records => {
+        for (const record of records) {
+            for (const node of record.removedNodes) if (isFloor(node)) { io.unobserve(node); visible.delete(node); }
+            for (const node of record.addedNodes) if (isFloor(node)) io.observe(node);
+        }
+    });
+    mo.observe(session.chat, { childList: true });
+    for (const el of renderedFloorsOf(session)) io.observe(el);
+    // 胶囊的横向位置只随正文区 / 正文列的尺寸变（拉窗口、钉抽屉、改宽度），不随滚动变
+    const ro = new ResizeObserver(() => { if (S === session && !session.follow.hidden) placeFollower(session); });
+    ro.observe(session.scroller); ro.observe(session.chat);
+    session.cleanup.push(() => { clearTimeout(timer); io.disconnect(); mo.disconnect(); ro.disconnect(); });
+}
+
+/** 松手后：正文里有选区就弹选中浮层（02 §1.5）。 */
+function checkSelection() {
+    const session = S;
+    if (!session?.handle) return;
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (!session.chat.contains(range.commonAncestorContainer)) return;
+    const text = selection.toString().trim();
+    if (!text) return;
+    const area = node => (node.nodeType === 1 ? node : node.parentElement)?.closest('.mes_text, .mes_reasoning') ?? null;
+    const start = area(range.startContainer), end = area(range.endContainer);
+    const container = start && start === end ? start : null;
+    const el = (start ?? end ?? (range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement))?.closest('.mes[mesid]');
+    session.selUi.showForSelection({ range, el, container, text });
+}
+
+/** 某楼的元素：按钮在楼里就是它所在的楼；跟随条、候选列表里的按钮带 data-index。 */
+function mesFor(target, actEl) {
+    const inFloor = target.closest('#stcr_chat .mes[mesid]');
+    if (inFloor) return inFloor;
+    const index = actEl?.dataset.index;
+    return index !== undefined && index !== '' ? floorEl(Number(index)) : null;
+}
+
+function onClick(event) {
+    const session = S;
+    if (!session) return;
+    const target = /** @type {Element} */ (event.target);
+    // 浮层按钮自己的处理已经把自己移走了（比如"写批注"关掉小浮层、打开输入框）：这次点击已处理完，
+    // 不能再被当成"点了浮层外面"，否则会把刚打开的输入框立刻关掉。
+    if (!target.isConnected) return;
+    if (session.popover && !session.popover.contains(target) && !target.closest('[data-act="swipe-list"], [data-act="jump"]')) closePopover(session);
+    if (session.settings.isOpen() && !session.settings.panel.contains(target) && target !== session.settings.fab) session.settings.close();
+    if (!session.follow.contains(target)) setFollowOpen(false);
+    // 抽屉/面板没钉住时浮在正文上，点它外面就收起（02 §3.1）。
+    let dismissedOverlay = false;
+    if (session.drawer.isOpen() && !session.drawer.el.contains(target) && !target.closest('[data-act="drawer"], [data-act="open-drawer"]')
+        && !(getPrefs().drawerPinned && wide())) { session.drawer.close(); dismissedOverlay = true; }
+    if (session.panel.isOpen() && !session.panel.el.contains(target) && !target.closest('[data-act="panel"]')
+        && !(getPrefs().panelPinned && wide())) { session.panel.close(); dismissedOverlay = true; }
+    if (dismissedOverlay && session.scroller.contains(target)) return; // 这一下只用来收抽屉/面板，不顺带翻页
+
+    const summary = target.closest('.mes_reasoning_summary');
+    if (summary) {
+        event.preventDefault(); // 展开状态由阅读器管理，不交给 <details> 自己切
+        toggleReasoning(summary.closest('.mes'));
+        return;
+    }
+    const actEl = target.closest('[data-act]');
+    const mes = mesFor(target, actEl);
+    const act = actEl?.dataset.act;
+    const fromFollow = !!target.closest('.stcr-follow');
+    if (act) {
+        switch (act) {
+            case 'exit': closeReader(); return;
+            case 'drawer': toggleDrawer(); return;
+            case 'close-drawer': session.drawer.close(); return;
+            case 'panel': togglePanel(); return;
+            case 'fav-chat': toggleChatFav(); return;
+            case 'redact-off': setPrefs({ redact: false }); say('已关闭脱敏显示'); return;
+            case 'close-panel': session.panel.close(); return;
+            case 'jump': openJump(); return;
+            case 'retry': if (session.chatKey) loadChat(session.chatKey, { index: session.retryIndex }); return;
+            case 'stale-reload': reloadStale(); return;
+            case 'reload': reloadStale(); return;
+            case 'stale-dismiss': hideStaleBanner(session); session.scroller.focus({ preventScroll: true }); return;
+            case 'continue': loadChat(actEl.dataset.key, { index: Number(actEl.dataset.index) }); return;
+            case 'open-drawer': session.drawer.open('recent'); return;
+            case 'swipe-prev': if (mes) { stepSwipe(mes, -1); if (fromFollow) scrollFloorTop(mes); } return;
+            case 'swipe-next': if (mes) { stepSwipe(mes, 1); if (fromFollow) scrollFloorTop(mes); } return;
+            case 'swipe-list': if (mes) openSwipeList(mes, actEl, { fromFollow }); return;
+            case 'swipe-pick': {
+                const follow = session.popover?.dataset.follow === '1';
+                const floor = floorEl(Number(actEl.dataset.index));
+                closePopover(session);
+                setSwipe(floor, Number(actEl.dataset.swipe));
+                if (follow && floor) scrollFloorTop(floor);
+                return;
+            }
+            case 'follow-top': if (mes) scrollFloorTop(mes); return;
+            case 'follow-toggle': setFollowOpen(!session.follow.classList.contains('stcr-follow--open')); return;
+            case 'floor-prev': stepFloor(Number(actEl.dataset.index), -1); return;
+            case 'floor-next': stepFloor(Number(actEl.dataset.index), 1); return;
+            case 'more': mes?.classList.toggle('stcr-toolbar-pinned'); return;
+            case 'reasoning': if (mes) toggleReasoning(mes); return;
+            case 'copy': if (mes) copyFloor(mes); return;
+            case 'copy-error': if (mes) copyFault(mes); return;
+            case 'copy-code': copyCode(actEl); return;
+            case 'copy-code-masked': copyCodeMasked(actEl); return;
+            case 'copy-html-masked': copyHtmlBlockMasked(actEl); return;
+            case 'html-shot': openHtmlShot(actEl); return;
+            case 'fold': toggleFold(actEl); return;
+            case 'bookmark-floor': if (mes) toggleBookmark(mes, false); return;
+            case 'bookmark-swipe': if (mes) toggleBookmark(mes, true); return;
+            case 'card': if (mes) openCardForFloor(mes); return;
+            default: break;
+        }
+    }
+    // 点在划线上（或批注角标上）：换色 / 编辑批注 / 取消划线（02 §1.5）
+    const noteMark = target.closest('.stcr-note-mark');
+    if (noteMark) { openMarkAt(noteMark.dataset.ann, noteMark.getBoundingClientRect()); return; }
+    if (mes && target.closest('.mes_text, .mes_reasoning') && !target.closest('a, button, pre') && !getSelection()?.toString()) {
+        const id = session.marks.hitTest(event.clientX, event.clientY, mes);
+        if (id) { openMarkAt(id, { left: event.clientX, right: event.clientX, width: 0, top: event.clientY - 10, bottom: event.clientY + 10, height: 20 }); return; }
+    }
+    // 分页模式：点正文左 1/3 上一页、右 1/3 下一页、中间呼出/收起顶栏（02 §1.3）。
+    if (isPaged() && session.scroller.contains(target) && !target.closest('button, a, input, textarea, select, summary, pre, .stcr-floor-toolbar, .stcr-popover')
+        && !getSelection()?.toString()) {
+        const rect = session.scroller.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / rect.width;
+        if (x < 1 / 3) flip(-1);
+        else if (x > 2 / 3) flip(1);
+        else session.root.classList.toggle('stcr-chrome-hidden');
+    }
+}
+
+function openMarkAt(id, rect) {
+    if (!S.marks.get(id)) return;
+    S.selUi.hideBubble();
+    S.selUi.showForMark(id, rect);
+}
+
+function handleKey(event) {
+    const session = S;
+    if (!session || event.type !== 'keydown' || event.isComposing) return;
+    if (session.studio.isOpen()) {
+        // 卡片工作台开着：阅读器快捷键一律不响应，Esc 关工作台（工作台里的按键它自己处理）
+        if (event.key === 'Escape') { session.studio.close(); event.preventDefault(); }
+        return;
+    }
+    if (session.htmlShot.isOpen()) {
+        if (event.key === 'Escape') { session.htmlShot.close(); event.preventDefault(); }
+        return;
+    }
+    if (session.docPanel.isOpen()) {
+        // 文档面板（本次更新 / 使用说明）开着：只认 Esc 关面板，方向键等留给面板自己滚动
+        if (event.key === 'Escape') { session.docPanel.close(); event.preventDefault(); }
+        return;
+    }
+    if (isTypingTarget(event.target)) {
+        if (event.key === 'Escape') {
+            // 在批注框里按 Esc = 不保存关掉；在别的输入框里 = 离开输入框
+            if (session.popover?.contains(event.target)) closePopover(session, { cancel: true });
+            else event.target.blur?.();
+            session.scroller.focus({ preventScroll: true });
+            event.preventDefault();
+        }
+        return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return; // 浏览器自己的组合键（复制、查找）照常
+    const paged = isPaged();
+    const screen = () => session.scroller.clientHeight * 0.9;
+    let handled = true;
+    switch (event.key) {
+        case 'Escape': closeTopLayer(); break;
+        case 'ArrowRight': case 'PageDown': case ' ':
+            if (event.key === ' ' && event.shiftKey) { paged ? flip(-1) : session.scroller.scrollBy({ top: -screen() }); break; }
+            paged ? flip(1) : session.scroller.scrollBy({ top: screen() }); break;
+        case 'ArrowLeft': case 'PageUp': paged ? flip(-1) : session.scroller.scrollBy({ top: -screen() }); break;
+        case 'ArrowDown': paged ? flip(1) : session.scroller.scrollBy({ top: 60 }); break;
+        case 'ArrowUp': paged ? flip(-1) : session.scroller.scrollBy({ top: -60 }); break;
+        case 'Home': if (session.handle?.total) jumpTo(0); break;
+        case 'End': if (session.handle?.total) jumpTo(session.handle.total - 1); break;
+        // T80：[ ] 上一楼 / 下一楼（以视口顶端这一楼为准）；换候选挪到 , .（同一个键上的 < >）
+        case '[': case ']': { const mes = currentFloor(); if (mes) stepFloor(Number(mes.getAttribute('mesid')), event.key === ']' ? 1 : -1); break; }
+        case ',': case '<': { const mes = keyTarget(); if (mes) stepSwipe(mes, -1); break; }
+        case '.': case '>': { const mes = keyTarget(); if (mes) stepSwipe(mes, 1); break; }
+        case 'r': case 'R': { const mes = getPrefs().hideReasoning ? null : keyTarget(); if (mes) toggleReasoning(mes); break; }
+        case 'b': case 'B': { const mes = keyTarget(); if (mes && !mes.classList.contains('stcr-mes--system')) toggleBookmark(mes, false); break; }
+        case 'g': case 'G': openJump(); break;
+        case '\\': toggleDrawer(); break;
+        case '/': togglePanel(); break;
+        default: handled = false;
+    }
+    if (handled) event.preventDefault();
+}
+
+/** Esc 逐层关闭：小浮层 → 设置条 → 面板 → 抽屉 → 阅读器本身（02 §1.1）。钉住的抽屉/面板不算一层。 */
+function closeTopLayer() {
+    if (S.studio.isOpen()) { S.studio.close(); return; }
+    if (S.popover) { closePopover(S, { cancel: true }); return; }
+    if (S.settings.isOpen()) { S.settings.close(); return; }
+    if (S.panel.isOpen() && !(getPrefs().panelPinned && wide())) { S.panel.close(); return; }
+    if (S.drawer.isOpen() && !(getPrefs().drawerPinned && wide())) { S.drawer.close(); return; }
+    closeReader();
+}
+
+function toggleDrawer() {
+    if (S.drawer.isOpen()) S.drawer.close();
+    else S.drawer.open();
+}
+function togglePanel() {
+    if (S.panel.isOpen()) S.panel.close();
+    else S.panel.open();
+}
+
+function onWheel(event) {
+    if (!isPaged()) return;
+    event.preventDefault();
+    const now = performance.now();
+    if (now - S.wheelAt > 400) S.wheelSum = 0;
+    S.wheelSum += event.deltaY;
+    if (Math.abs(S.wheelSum) < 40 || now - S.wheelAt < 350) return;
+    S.wheelAt = now;
+    flip(S.wheelSum > 0 ? 1 : -1);
+    S.wheelSum = 0;
+}
+
+/** A 方向：鼠标静止 2 秒后顶栏与底栏淡出（02 §7）；B 方向常驻。 */
+function wakeChrome() {
+    if (!S || getPrefs().direction !== 'a') return;
+    S.root.classList.remove('stcr-chrome-hidden');
+    clearTimeout(S.chromeTimer);
+    S.chromeTimer = setTimeout(() => {
+        if (S && getPrefs().direction === 'a' && !S.settings.isOpen() && !S.drawer.isOpen() && !S.panel.isOpen() && !S.popover) S.root.classList.add('stcr-chrome-hidden');
+    }, 2000);
+}
+
+// ───────────────────────── 设置 ─────────────────────────
+
+function isPaged() { return effectivePrefs(getPrefs()).mode === 'paged'; }
+
+function applyPrefs(prefs) {
+    const { root } = S;
+    const shown = effectivePrefs(prefs);
+    root.classList.toggle('stcr-dir-a', prefs.direction === 'a');
+    root.classList.toggle('stcr-dir-b', prefs.direction !== 'a');
+    root.classList.toggle('stcr-mode-paged', shown.mode === 'paged');
+    root.classList.toggle('stcr-mode-scroll', shown.mode !== 'paged');
+    root.classList.toggle('stcr-hide-user', prefs.hideUser);
+    root.classList.toggle('stcr-hide-reasoning', prefs.hideReasoning);
+    root.classList.toggle('stcr-redacted', prefs.redact);
+    root.classList.toggle('stcr-html-bar-hidden', prefs.htmlBarHidden);
+    root.classList.toggle('stcr-follow-pinned', prefs.followOpen);
+    setRedactState(prefs.redact ? sideRedaction(S) : null);
+    setTitles(S);
+    S.redactBadge.hidden = !prefs.redact;
+    root.classList.toggle('stcr-drawer-pinned', prefs.drawerPinned);
+    root.classList.toggle('stcr-panel-pinned', prefs.panelPinned);
+    root.classList.toggle('stcr-lh-custom', prefs.lineHeight !== null);
+    root.style.setProperty('--stcr-font-delta', `${prefs.fontDelta}px`);
+    if (prefs.lineHeight !== null) root.style.setProperty('--stcr-line-height', String(prefs.lineHeight));
+    else root.style.removeProperty('--stcr-line-height');
+    if (shown.width !== null) root.style.setProperty('--stcr-width', `${shown.width}px`);
+    else root.style.removeProperty('--stcr-width');
+    if (prefs.direction !== 'a') root.classList.remove('stcr-chrome-hidden');
+    S.follow.dataset.side = prefs.followSide;
+    if (!S.follow.hidden) placeFollower(S); // 左 / 右换了（T82：位置不再每帧重算）
+    S.settings.sync();
+}
+
+function onPrefs(next, previous) {
+    if (!S) return;
+    dropPrebuilt(); // 任何显示设置都可能改楼层长相
+    const anchor = captureAnchor();
+    applyPrefs(next);
+    if (next.hideUser !== previous.hideUser || next.hideStHidden !== previous.hideStHidden) { rerender(anchor); return; }
+    if (next.redact !== previous.redact) {
+        const session = S;
+        (next.redact ? loadRedaction(session) : Promise.resolve()).then(() => {
+            if (S !== session) return;
+            refreshSideTexts(session);
+            rerender(anchor);
+            if (next.redact && !hasRedaction(sideRedaction(session))) say('还没有屏蔽词或替换规则：在分享卡片里添加后，这里就会按它们显示');
+        });
+        return;
+    }
+    // 自动名字（T81）：脱敏显示开着时正文、小字、HTML 块都要换一遍
+    if (next.autoNames !== previous.autoNames && next.redact) { refreshSideTexts(S); rerender(anchor); return; }
+    // HTML 默认改了：清掉逐块的这一项，全部按新默认（T44b）
+    const htmlReset = [next.htmlMode !== previous.htmlMode ? 'mode' : null, next.htmlNetwork !== previous.htmlNetwork ? 'network' : null].filter(Boolean);
+    if (htmlReset.length) S.html.resetAll(htmlReset);
+    if (next.expandAllReasoning !== previous.expandAllReasoning) {
+        S.reasoning.clear(); // "全部展开/折叠"清掉逐楼记忆（02 §5.2）
+        for (const details of S.chat.querySelectorAll('.mes_reasoning_details')) details.open = next.expandAllReasoning;
+    }
+    restoreAnchor(anchor);
+    updateProgress();
+}
+
+// ───────────────────────── 脱敏显示（T45） ─────────────────────────
+
+/** 顶栏标题：角色名 · 聊天名（脱敏显示时按规则 / 屏蔽词换）。 */
+function setTitles(session) {
+    if (!session?.handle) return;
+    session.titleOwner.textContent = redactString(session.owner, session.chatKey) || '阅读器';
+    session.titleFile.textContent = redactString(session.handle.title, session.chatKey);
+}
+
+/** 脱敏开关或词表变了：正文以外的小字也跟着换（面板、抽屉、跟随条）。 */
+function refreshSideTexts(session) {
+    setRedactState(getPrefs().redact ? sideRedaction(session) : null);
+    setTitles(session);
+    session.panel.refresh();
+    session.drawer.refreshList?.();
+    session.follow.dataset.key = '';
+    updateFollower();
+}
+
+/** 自动名字开着时这一楼（或整个聊天，model 为空）要换的名字；关着为 null（T81/D38）。 */
+function redactNames(session, model = null) {
+    if (!getPrefs().autoNames || !session.handle) return null;
+    const { userName, characterName, isGroup } = htmlMaskBase(session, model);
+    // 小字（标题、面板）不属于某一楼：群聊时按聊天的主角色名
+    return { userName, characterName: model || !isGroup ? characterName : session.handle.header.characterName ?? '', isGroup };
+}
+
+/** 小字用的脱敏状态：词表 + 名字 + 这是哪个聊天（别的聊天的小字不换名字）。读不到词表时为 null。 */
+function sideRedaction(session) {
+    if (!session.redact) return null;
+    const key = session.chatKey ? parseChatKey(session.chatKey) : null;
+    return { ...session.redact, names: redactNames(session), chatKey: session.chatKey ?? null, avatarUrl: key?.avatarUrl ?? null };
+}
+
+/** Aa → 管理屏蔽词与替换规则（T81）：用文档面板装现成的规则管理页；有改动且脱敏显示开着就重读重排。 */
+function openRulesSheet(session) {
+    let changed = false;
+    const manager = createRulesManager({ host: session.root, chatKey: session.chatKey ?? null, toast: say, words: true, backLabel: null,
+        confirm: (message, ok) => confirmDialog(message, ok), onChange: () => { changed = true; }, onBack: () => session.docPanel.close(),
+        autoNames: () => (getPrefs().autoNames && session.handle ? [session.handle.header.userName, session.handle.header.characterName].filter(Boolean) : []) });
+    session.settings.close();
+    session.docPanel.open({ title: '屏蔽词与替换规则', body: manager.el, onClose: () => {
+        if (S !== session || !changed || !getPrefs().redact) return;
+        loadRedaction(session).then(() => { if (S === session) { refreshSideTexts(session); rerender(captureAnchor()); } });
+    } });
+    manager.load().catch(error => say(`规则没读出来：${describeStoreError(error)}`));
+}
+
+/** 读屏蔽词、替换规则、图片（规则可能换成图片）。读不到就当没有，正文照常显示原文。 */
+async function loadRedaction(session) {
+    try {
+        const [words, rules, assets] = await Promise.all([store.maskWords.list(), store.replaceRules.list(), store.assets.list()]);
+        session.redact = { words, rules, assets: new Map(assets.map(a => [a.id, a])) };
+    } catch (error) {
+        console.warn('[st-reader] 脱敏显示：屏蔽词或规则读取失败', error);
+        session.redact = null;
+        say(`脱敏显示暂时用不了：${describeStoreError(error)}`);
+    }
+}
+
+// ───────────────────────── 划线、收藏、备份 ─────────────────────────
+
+/** 划线/收藏有变：刷新顶栏角标、面板、楼层图标、跟随条；备份提醒去抖刷新。 */
+function onMarksChange(session) {
+    if (S !== session) return;
+    const records = session.marks.records();
+    const orphans = records.filter(r => r.orphan).length;
+    const badge = session.panelBtn.querySelector('.stcr-badge');
+    const count = records.length + session.marks.bookmarks().length;
+    badge.textContent = count ? String(count > 99 ? '99+' : count) : '';
+    session.panelBtn.classList.toggle('stcr-panel-btn--warn', orphans > 0);
+    session.panelBtn.title = orphans ? `划线、批注与收藏（有 ${orphans} 条孤立的划线）` : '划线、批注与收藏（/）';
+    session.panel.refresh();
+    if (session.handle) {
+        const ctx = floorContext();
+        for (const el of renderedFloors()) if (!el.classList.contains('stcr-mes--broken')) syncBookmarkMarks(ctx, el);
+    }
+    dropPrebuilt(session); // 预建的楼带着旧的收藏标记
+    session.follow.dataset.key = ''; // 跟随条里的星标跟着变
+    updateFollower();
+    clearTimeout(session.statusTimer);
+    session.statusTimer = setTimeout(() => refreshBackupStatus(), 1200);
+}
+
+async function toggleBookmark(mes, forSwipe) {
+    const index = Number(mes.getAttribute('mesid'));
+    const swipe = forSwipe ? Number(mes.dataset.swipe) : null;
+    try {
+        // 摘要用屏幕上看到的文字（正则处理后），不用带标记的原文
+        const on = await S.marks.toggleBookmark(index, swipe, { preview: floorPlainText(mes) });
+        say(on ? (swipe === null ? `已收藏第 ${index + 1} 楼` : `已收藏第 ${index + 1} 楼的第 ${swipe + 1} 个候选`) : '已取消收藏');
+    } catch (error) {
+        console.error('[st-reader] 收藏失败：', error);
+        say(`收藏没保存上：${describeStoreError(error)}`);
+    }
+}
+
+/** 顶栏 ☆：收藏整个聊天（D19）。楼 / 候选的收藏在楼层工具条和右侧面板。 */
+async function syncChatFav(session) {
+    const button = session.favBtn;
+    session.reloadBtn.hidden = !(session.handle && session.chatKey);
+    if (!session.handle || !session.chatKey) { button.hidden = true; return; }
+    try { await loadFavoriteChats(); } catch { button.hidden = true; return; }
+    if (S !== session) return;
+    const on = isFavoriteChat(session.chatKey);
+    button.hidden = false;
+    button.classList.toggle('stcr-on', on);
+    button.setAttribute('aria-pressed', String(on));
+    button.title = on ? '取消收藏此聊天' : '收藏此聊天（在左侧"收藏"页里能找到）';
+    button.setAttribute('aria-label', on ? '取消收藏此聊天' : '收藏此聊天');
+    const icon = button.querySelector('i');
+    icon.classList.toggle('fa-solid', on);
+    icon.classList.toggle('fa-regular', !on);
+}
+
+async function toggleChatFav() {
+    const session = S;
+    if (!session?.handle) return;
+    try {
+        const on = await toggleFavoriteChat(session.chatKey, [session.owner, session.handle.title].filter(Boolean).join(' · '));
+        say(on ? '已收藏此聊天（左侧抽屉"收藏"页）' : '已取消收藏此聊天');
+    } catch (error) {
+        console.error('[st-reader] 收藏聊天失败：', error);
+        say(`没收藏上：${describeStoreError(error)}`);
+    }
+}
+
+/** 从面板/抽屉跳到某楼某候选；是划线就滚到那段并闪两下。别的聊天：先打开它再跳。 */
+async function jumpToMark({ chatKey, index, swipe, annotationId, part }) {
+    const session = S;
+    if (!session) return;
+    if (!getPrefs().panelPinned || !wide()) session.panel.close();
+    if (chatKey && (chatKey !== session.chatKey || !session.handle)) {
+        await loadChat(chatKey, { index, swipe: swipe ?? null });
+        if (S !== session || session.chatKey !== chatKey || !session.handle) return; // 打开失败或又换了聊天
+        session.panel.refresh();
+    }
+    if (!session.handle) return;
+    if (part === 'reasoning') {
+        session.reasoning.set(index, true);
+        if (getPrefs().hideReasoning) say('这条划线在思维链里；思维链现在是"隐藏"，到 Aa 里改成"折叠"或"展开"就能看到');
+    }
+    const el = floorEl(index);
+    const sameView = el && isShown(el) && (swipe === null || swipe === undefined || Number(el.dataset.swipe) === swipe)
+        && (part !== 'reasoning' || el.querySelector('.mes_reasoning_details')?.open);
+    if (sameView) {
+        if (!annotationId) scrollFloorTop(el);
+    } else jumpTo(index, { swipe: swipe ?? null });
+    if (annotationId) session.marks.flash(annotationId, { scrollIntoView: range => scrollToRange(range) });
+}
+
+function scrollToRange(range) {
+    const view = S.scroller.getBoundingClientRect();
+    const rect = range.getBoundingClientRect();
+    if (rect.top >= view.top + 40 && rect.bottom <= view.bottom - 40) return;
+    S.scroller.scrollTop += rect.top - view.top - view.height / 3;
+    const node = range.startContainer;
+    const mes = (node.nodeType === 1 ? node : node.parentElement)?.closest('.mes[mesid]');
+    if (mes) holdAt(S, mes, mes.getBoundingClientRect().top - view.top);
+    updateProgress();
+}
+
+// ───────────────────────── 分享卡片（T23a） ─────────────────────────
+
+function openStudio(source) {
+    const session = S;
+    closePopover(session, { cancel: true });
+    session.selUi.hideBubble();
+    session.studio.open(source).catch(error => {
+        console.error('[st-reader] 卡片工作台打开失败：', error);
+        say(`卡片工作台打不开：${error.message ?? error}`);
+    });
+}
+
+/** 楼层工具条 🖼：整楼（当前显示的候选）。 */
+function openCardForFloor(mes) {
+    if (!S?.handle || mes.classList.contains('stcr-mes--broken')) return;
+    openStudio({ handle: S.handle, ownsHandle: false, kind: 'floor', annotations: S.marks.records(), includeReasoning: false,
+        floors: [wholeFloor(Number(mes.getAttribute('mesid')), Number(mes.dataset.swipe))] });
+}
+
+/** 选中浮层"卡片"：可跨楼；只摘看得见的楼和展开着的思维链。 */
+function openCardFromSelection(range) {
+    const session = S;
+    if (!session?.handle) return;
+    const floors = selectionToFloors(range, renderedFloors());
+    if (!floors.length) { say('这段选区里没有正文文字'); return; }
+    if (floors.length > MAX_CARD_FLOORS) { say(`一张卡最多 ${MAX_CARD_FLOORS} 楼，请少选一些`); return; }
+    getSelection()?.removeAllRanges();
+    openStudio({ handle: session.handle, ownsHandle: false, kind: 'selection', floors, annotations: session.marks.records(),
+        includeReasoning: floors.some(floor => floor.reasoning) });
+}
+
+/** 批注面板划线条目上的 🖼：别的聊天的划线就自己只读打开那个聊天，工作台关掉时释放。 */
+async function openCardFromNote(record) {
+    const session = S;
+    if (!session) return;
+    if (!getPrefs().panelPinned || !wide()) session.panel.close();
+    const chatKey = record.anchor.chatKey;
+    const borrowed = !!session.handle && chatKey === session.chatKey;
+    let handle = borrowed ? session.handle : null;
+    try {
+        if (!handle) handle = await openChat(chatKey, { pageSize: PAGE_SIZE });
+        if (S !== session) { if (!borrowed) handle.close(); return; }
+        const floor = await annotationToFloor(handle, record, createPieceCache());
+        if (!floor) { say('这条划线找不到原文位置了（原文可能变了）'); if (!borrowed) handle.close(); return; }
+        const annotations = borrowed ? session.marks.records() : await store.annotations.list({ chatKey });
+        if (S !== session) { if (!borrowed) handle.close(); return; }
+        openStudio({ handle, ownsHandle: !borrowed, kind: 'note', floors: [floor], annotations, includeReasoning: record.anchor.part === 'reasoning' });
+    } catch (error) {
+        if (handle && !borrowed) handle.close();
+        console.error('[st-reader] 用划线做卡片失败：', error);
+        say(error instanceof RangeError ? '这条划线所在的楼已经不存在了' : `卡片打不开：${describeError(error)}`);
+    }
+}
+
+async function doExport() {
+    try {
+        const name = await exportBackup(S.root);
+        say(`已导出：${name}（在浏览器的下载文件夹里）`);
+        refreshBackupStatus();
+    } catch (error) {
+        console.error('[st-reader] 导出失败：', error);
+        say(`导出失败：${describeStoreError(error)}`);
+    }
+}
+
+function doImport() {
+    const session = S;
+    pickAndImport({ root: session.root, toast: say, confirm: (content, ok) => confirmDialog(content, ok), onImported: () => afterDataMerged(session) });
+}
+
+async function refreshBackupStatus() {
+    const session = S;
+    if (!session) return;
+    showMirrorStatus(session);
+    try {
+        const status = await backupStatus();
+        // 自动备份正常时不再催手动导出（D33）；只在自动备份用不了时才亮小点
+        const mirror = getMirrorStatus();
+        const remind = status.remind && ['error', 'unavailable', 'never'].includes(mirror.state);
+        if (S === session) session.settings.setBackupStatus({ ...status, remind });
+    } catch { /* 存储不可用时不提醒 */ }
+}
+
+function showMirrorStatus(session) {
+    const status = getMirrorStatus();
+    session.settings.setMirrorStatus(mirrorStatusText(status), status.state === 'saving' || session.restoring);
+}
+
+async function doMirror() {
+    const session = S;
+    const status = await mirrorNow({ force: true });
+    if (S !== session) return;
+    say(status.state === 'ok' ? '已备份到 ST 服务器' : `没备份成功：${status.message || '原因不明'}`);
+    refreshBackupStatus();
+}
+
+async function doRestore() {
+    const session = S;
+    if (session.restoring) return;
+    session.restoring = true;
+    showMirrorStatus(session);
+    let result;
+    try { result = await restoreFromServer(); } finally { session.restoring = false; }
+    if (S !== session) return;
+    showMirrorStatus(session);
+    if (!result.ok) { say(`没恢复成功：${result.message}`); return; }
+    say(restoreSummary(result.report) || '服务器上那份的内容你这里都有，没有需要恢复的');
+    await afterDataMerged(session);
+}
+
+/** 导入 / 从服务器恢复之后：设置、划线、收藏都重读一遍。 */
+async function afterDataMerged(session) {
+    if (S !== session) return;
+    await reloadPrefs();
+    if (session.handle && await session.marks.loadChat(session.chatKey)) {
+        for (const el of renderedFloors()) session.marks.paintFloor(el);
+    }
+    resetFavoriteChats(); // 备份里可能带进收藏的聊天
+    if (session.chatKey) syncChatFav(session);
+    session.drawer.refreshFavorites();
+    refreshBackupStatus();
+}
+
+// ───────────────────────── 聊天加载 ─────────────────────────
+
+/**
+ * 打开一个聊天。连续快速点击时只有最后一次生效，过期结果立即关闭（03 §5.3）。
+ * handle：已经读好的句柄（横幅"重新加载"先读成功再换，失败时旧正文不动）；anchor：换完回到这一楼的同一位置。
+ */
+async function loadChat(chatKey, { index = null, swipe = null, handle: ready = null, anchor = null } = {}) {
+    const session = S;
+    if (!session) return;
+    const token = ++session.token;
+    session.controller?.abort();
+    const controller = new AbortController();
+    session.controller = controller;
+    closePopover(session);
+    releaseChat(session);
+    session.chatKey = chatKey;
+    session.retryIndex = index;
+    session.drawer.markActive();
+    showState('loading');
+    try {
+        const handle = ready ?? await openChat(chatKey, { pageSize: PAGE_SIZE, signal: controller.signal });
+        if (S !== session || token !== session.token) { handle.close(); return; }
+        session.handle = handle;
+        watchStale(session, handle);
+        session.owner = handle.header.characterName || (handle.isGroup ? '群聊' : '');
+        setRedactState(getPrefs().redact ? sideRedaction(session) : null); // 自动名字要等聊天读出来才知道名字（T81）
+        setTitles(session);
+        session.root.setAttribute('aria-label', `阅读器：${session.owner} · ${handle.title}`);
+        syncChatFav(session);
+        try {
+            if (!await session.marks.loadChat(chatKey)) return;
+        } catch (error) {
+            // 批注读不出来不耽误读聊天
+            console.error('[st-reader] 划线与收藏读取失败：', error);
+            say(`划线与收藏读取失败：${describeStoreError(error)}`);
+        }
+        if (S !== session || token !== session.token) return;
+        const saved = getProgress(chatKey);
+        session.swipeView = new Map(Object.entries(saved?.sw ?? {}).map(([key, value]) => [Number(key), value]));
+        session.reasoning = new Map();
+        if (!handle.total) { showState('empty-chat'); updateProgress(); return; }
+        let start = index ?? saved?.i ?? 0;
+        start = Math.min(handle.total - 1, Math.max(0, Number.isInteger(start) ? start : 0));
+        if (Number.isInteger(swipe)) session.swipeView.set(start, swipe);
+        showState(null);
+        jumpTo(start);
+        if (anchor?.index === start) restoreAnchor(anchor, { hold: true });
+    } catch (error) {
+        if (error?.name === 'AbortError' || S !== session || token !== session.token) return;
+        console.error('[st-reader] 打开聊天失败：', error);
+        showState('error', error);
+    }
+}
+
+/** 离开聊天：先清 DOM 与模型引用，再 close 旧 handle（03 §5.3）。 */
+function releaseChat(session) {
+    if (session.handle && session.studio.usesHandle(session.handle)) session.studio.close();
+    session.marks.reset();
+    session.chat.replaceChildren();
+    session.firstPage = session.lastPage = -1;
+    session.hoverIndex = null;
+    session.staleOff?.();
+    session.staleOff = null;
+    hideStaleBanner(session);
+    session.handle?.close();
+    dropPrebuilt(session);
+    session.handle = null;
+    session.titleOwner.textContent = '阅读器';
+    session.titleFile.textContent = '';
+    session.favBtn.hidden = true;
+    session.reloadBtn.hidden = true;
+    session.follow.hidden = true;
+    session.follow.dataset.key = '';
+}
+
+// ───────────────────────── 有新内容横幅（D28） ─────────────────────────
+
+/** 缓存命中的聊天，后台校验发现 ST 那边已经变了：订阅 core 的通知（03 §5.14），只改阅读器自己的界面。 */
+function watchStale(session, handle) {
+    session.staleOff?.();
+    session.staleOff = handle.onStale(({ chatKey, reason }) => {
+        if (S !== session || session.handle !== handle || staleNoticed.has(chatKey)) return;
+        staleNoticed.add(chatKey);
+        showStaleBanner(session, reason);
+    });
+}
+
+function showStaleBanner(session, reason) {
+    hideStaleBanner(session);
+    const missing = reason === 'missing';
+    const text = missing
+        ? h('span', { class: 'stcr-banner-text', text: '这个聊天在 ST 里找不到了（可能已删除或改名），下面是之前读到的内容' })
+        : h('button', { type: 'button', class: 'stcr-btn stcr-banner-text', 'data-act': 'stale-reload', text: '此聊天有新内容，点击重新加载' });
+    session.banner = h('div', { class: 'stcr-banner', role: 'status' },
+        h('i', { class: `fa-solid ${missing ? 'fa-circle-exclamation' : 'fa-rotate'} stcr-banner-icon`, 'aria-hidden': 'true' }),
+        text,
+        iconButton('fa-xmark', '关闭提示', { class: 'stcr-banner-close', 'data-act': 'stale-dismiss' }));
+    session.main.append(session.banner);
+    session.root.classList.add('stcr-has-banner');
+}
+
+function hideStaleBanner(session) {
+    session.banner?.remove();
+    session.banner = null;
+    session.root.classList.remove('stcr-has-banner');
+}
+
+/** 点横幅或顶栏"重新读取"（T71 / D34 ④）：先只读地重新读一遍（reload:true），读成功才换正文并回到原来那一楼；失败旧正文不动，给一句提示。 */
+async function reloadStale() {
+    const session = S;
+    if (!session?.handle || session.reloading) return;
+    const { chatKey, handle } = session;
+    const anchor = captureAnchor();
+    const label = session.banner?.querySelector('.stcr-banner-text');
+    session.reloading = true;
+    session.reloadBtn.classList.add('stcr-busy'); session.reloadBtn.disabled = true;
+    if (label) { label.textContent = '正在重新加载…'; label.disabled = true; }
+    try {
+        const next = await openChat(chatKey, { pageSize: PAGE_SIZE, reload: true });
+        if (S !== session || session.handle !== handle) { next.close(); return; }
+        staleNoticed.delete(chatKey); // 换成新快照了：以后再变还会提示
+        await loadChat(chatKey, { index: anchor?.index ?? null, handle: next, anchor });
+        if (S === session && session.handle === next) say('已重新加载');
+    } catch (error) {
+        if (S !== session || session.handle !== handle) return;
+        console.error('[st-reader] 重新加载失败：', error);
+        if (label?.isConnected) { label.textContent = '此聊天有新内容，点击重新加载'; label.disabled = false; }
+        say(`重新加载失败：${describeError(error)} 下面仍是之前的内容。`);
+    } finally {
+        session.reloading = false;
+        session.reloadBtn.classList.remove('stcr-busy'); session.reloadBtn.disabled = false;
+    }
+}
+
+function showState(kind, error) {
+    const box = S.stateBox;
+    S.root.classList.toggle('stcr-has-state', !!kind);
+    if (!kind) { box.hidden = true; box.replaceChildren(); return; }
+    box.hidden = false;
+    if (kind === 'loading') {
+        box.replaceChildren(h('div', { class: 'stcr-skeleton-wrap', 'aria-label': '正在读取' },
+            ...[92, 76, 84].map(width => h('div', { class: 'stcr-skeleton', style: `width:${width}%` }))));
+    } else if (kind === 'empty-chat') {
+        box.replaceChildren(h('div', { class: 'stcr-empty' }, h('i', { class: 'fa-regular fa-comments stcr-empty-icon', 'aria-hidden': 'true' }), h('p', { text: '这个聊天还没有内容。' })));
+    } else if (kind === 'error') {
+        box.replaceChildren(h('div', { class: 'stcr-empty' },
+            h('i', { class: 'fa-solid fa-triangle-exclamation stcr-empty-icon', 'aria-hidden': 'true' }),
+            h('p', { text: describeError(error) }),
+            h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'retry', text: '重试' })));
+    }
+}
+
+function describeError(error) {
+    switch (error?.code) {
+        case 'NOT_FOUND': return '找不到这个聊天，可能已经在 ST 里被删除或改名。';
+        case 'INVALID_KEY': return '这个聊天的地址无效。';
+        case 'INVALID_RESPONSE': return 'ST 返回的数据格式不对，读不出来。';
+        default:
+            if (/^HTTP_/.test(error?.code ?? '')) return `读取失败（${error.code.replace('HTTP_', 'HTTP ')}）。确认 ST 还开着，再点重试。`;
+            if (error instanceof TypeError) return '聊天文件里有损坏的楼层，阅读器不跳过它以免楼号错位。';
+            return '读取失败，请确认 ST 还开着，再点重试。';
+    }
+}
+
+/** 空状态：没打开聊天时。有上次读到一半的就给"继续阅读"卡片（02 §1.1）。 */
+function showEmpty() {
+    const last = lastRead();
+    S.stateBox.hidden = false;
+    S.root.classList.add('stcr-has-state');
+    S.stateBox.replaceChildren(h('div', { class: 'stcr-empty' },
+        h('i', { class: 'fa-solid fa-book-open stcr-empty-icon', 'aria-hidden': 'true' }),
+        h('p', { text: '从左边选一个聊天开始读。' }),
+        h('button', { type: 'button', class: 'stcr-btn stcr-text-btn stcr-empty-open', 'data-act': 'open-drawer', text: '打开聊天列表' }),
+        last ? h('button', { type: 'button', class: 'stcr-btn stcr-continue', 'data-act': 'continue', 'data-key': last.chatKey, 'data-index': last.i ?? 0 },
+            h('span', { class: 'stcr-continue-label', text: '继续阅读' }),
+            h('span', { class: 'stcr-continue-title', text: `《${[last.owner, last.title].filter(Boolean).join(' · ') || '上次的聊天'}》第 ${(last.i ?? 0) + 1} 楼` })) : null));
+}
+
+// ───────────────────────── 正文窗口 ─────────────────────────
+
+function floorContext() {
+    const session = S;
+    const key = session.chatKey ? parseChatKey(session.chatKey) : null;
+    return {
+        handle: session.handle,
+        avatarFor(model) {
+            if (model.isUser) return session.userAvatar ? `/thumbnail?type=persona&file=${encodeURIComponent(session.userAvatar)}` : null;
+            if (session.handle.isGroup) return model.originalAvatar ? thumb(model.originalAvatar) : null;
+            return key?.avatarUrl ? thumb(key.avatarUrl) : null;
+        },
+        isReasoningOpen: index => session.reasoning.has(index) ? session.reasoning.get(index) : getPrefs().expandAllReasoning,
+        isBookmarked: (index, swipe) => session.marks.isBookmarked(index, swipe),
+        attachHtml: (text, blocks, where) => session.html.attach(text, blocks, where),
+        redactFor: model => {
+            const data = getPrefs().redact && session.redact ? { ...session.redact, names: redactNames(session, model) } : null;
+            if (!hasRedaction(data)) return null;
+            // 规则作用范围：单聊 = 这个角色；群聊 = 这一楼的发言成员（用户楼只有"全部聊天"的规则）
+            const avatarUrl = session.handle.isGroup ? (model.isUser ? null : model.originalAvatar ?? null) : key?.avatarUrl ?? null;
+            return { ...data, avatarUrl };
+        },
+    };
+}
+
+/** 一批楼层的节点（收起用户楼 / ST 隐藏楼时，在每段连续收起的楼前插一条"— 你 · N 条 —" / "— 已隐藏 · N 条 —"）。 */
+function pageNodes(pageIndex) {
+    const ready = takePrebuilt(pageIndex);
+    if (ready) return ready;
+    const builder = pageBuilder(pageIndex);
+    while (!builder.step());
+    return builder.nodes;
+}
+
+/** 一批楼的分步构建：step() 每次建一楼，建完返回 true。pageNodes 一口气走完；空闲预建（T82）每次走一两步。 */
+function pageBuilder(pageIndex) {
+    const { messages } = S.handle.page(pageIndex);
+    const ctx = floorContext();
+    const { hideUser, hideStHidden } = getPrefs();
+    const fold = { hideUser, hideStHidden };
+    const runs = hideUser || hideStHidden ? foldRuns(messages, fold) : new Map();
+    const nodes = [];
+    let run = null, at = 0;
+    const step = () => {
+        if (at >= messages.length) return true;
+        const model = messages[at++];
+        if (runs.has(model.index)) {
+            run = model.index;
+            nodes.push(h('button', { type: 'button', class: 'stcr-btn stcr-fold', 'data-act': 'fold', 'data-run': run, 'data-page': pageIndex, 'aria-expanded': 'false',
+                text: runs.get(run).label, title: '点开看这几条' }));
+        } else if (!isFolded(model, fold)) run = null;
+        let el;
+        try {
+            el = buildFloor(ctx, model, pickSwipe(S.swipeView.get(model.index), model));
+        } catch (error) {
+            // 单楼渲染失败不拖垮整页：显示一行说明，楼号不变。
+            console.error(`[st-reader] 第 ${model.index + 1} 楼渲染失败：`, error);
+            el = h('div', { class: 'mes stcr-mes stcr-mes--broken', mesid: model.index, is_user: String(model.isUser), is_system: 'false' },
+                h('div', { class: 'mes_block' }, h('div', { class: 'mes_text', text: `（第 ${model.index + 1} 楼显示失败）` })));
+        }
+        el.dataset.page = String(pageIndex);
+        if (isFolded(model, fold) && run !== null) { el.classList.add('stcr-user-hidden'); el.dataset.run = String(run); }
+        nodes.push(el);
+        return at >= messages.length;
+    };
+    return { pageIndex, nodes, step };
+}
+
+// ───────────── 空闲预建（T82，I020） ─────────────
+// 接一批要把 30 楼长文格式化、清洗、建 DOM（4000 楼样本约 100 ms），放在滚到边上的那一帧里就是一次卡顿。
+// 所以窗口前后各一批在浏览器空闲时先建好（每次空闲只建到剩余时间不够为止），接批时直接插入。
+// 只是提前建同样的节点：渲染版本（跳楼、改设置、收藏变化都会加一）对不上就扔掉重建，结果与当场建完全一样。
+
+/** 渲染条件变了：先建好的批作废（里面的 HTML 块一并注销）。 */
+function dropPrebuilt(session = S) {
+    if (!session) return;
+    session.renderVersion++;
+    for (const entry of session.prebuilt.values()) session.html.settle(entry.builder.nodes, false);
+    session.prebuilt.clear();
+}
+
+/** ensureWindow 要接的那批若已预建（或建了一半）：补完剩下的，交出节点。 */
+function takePrebuilt(pageIndex) {
+    const session = S;
+    const entry = session.prebuilt.get(pageIndex);
+    if (!entry) return null;
+    session.prebuilt.delete(pageIndex);
+    if (entry.version !== session.renderVersion || entry.handle !== session.handle) { session.html.settle(entry.builder.nodes, false); return null; }
+    while (!entry.builder.step());
+    session.html.settle(entry.builder.nodes, true); // 马上就插进页面
+    return entry.builder.nodes;
+}
+
+function schedulePrebuild(session = S) {
+    if (!session?.handle || session.prebuildJob || session.firstPage < 0) return;
+    const idle = globalThis.requestIdleCallback ?? (run => setTimeout(() => run({ timeRemaining: () => 8 }), 50));
+    session.prebuildJob = idle(deadline => {
+        session.prebuildJob = 0;
+        if (S !== session || !session.handle) return;
+        const wanted = [session.lastPage + 1, session.firstPage - 1].filter(page => page >= 0 && page < session.handle.pageCount);
+        for (const [page, entry] of session.prebuilt) {
+            if (!wanted.includes(page) || entry.version !== session.renderVersion) { session.html.settle(entry.builder.nodes, false); session.prebuilt.delete(page); }
+        }
+        let pending = false;
+        for (const page of wanted) {
+            let entry = session.prebuilt.get(page);
+            if (!entry) { entry = { builder: pageBuilder(page), version: session.renderVersion, handle: session.handle, done: false }; session.prebuilt.set(page, entry); }
+            while (!entry.done && deadline.timeRemaining() > 6) entry.done = session.html.prebuild(() => entry.builder.step());
+            if (!entry.done) { pending = true; break; }
+        }
+        if (pending) schedulePrebuild(session);
+    }, { timeout: 2000 });
+}
+
+/** 新放进页面的楼：把它们的划线画上（异步，不挡翻页）。 */
+function paintNodes(nodes) {
+    for (const node of nodes) {
+        if (node.matches?.('.mes[mesid]:not(.stcr-mes--broken)')) S.marks.paintFloor(node);
+    }
+}
+
+function renderedFloors() { return renderedFloorsOf(S); }
+function renderedFloorsOf(session) { return session.chat.querySelectorAll(':scope > .mes[mesid]'); }
+function floorEl(index) { return S.chat.querySelector(`:scope > .mes[mesid="${index}"]`); }
+const isShown = el => el.offsetParent !== null || el.getClientRects().length > 0;
+
+/** 视口顶端附近的第一楼 + 它相对视口的位置；改设置、增删批次后据此把阅读位置放回原处。 */
+function captureAnchor() {
+    if (!S?.handle) return null;
+    const top = S.scroller.getBoundingClientRect().top;
+    for (const el of renderedFloors()) {
+        if (!isShown(el)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.bottom > top + 1) return { index: Number(el.getAttribute('mesid')), offset: rect.top - top };
+    }
+    return null;
+}
+/** hold：刚整批重建过（跳楼 / 重排）时传 true，之后几帧守住位置（见 holdAt）；接批 / 释放时楼还在视口里，浏览器自己会锚定。 */
+function restoreAnchor(anchor, { hold = false } = {}) {
+    if (!anchor) return;
+    const el = floorEl(anchor.index);
+    if (!el || !isShown(el)) return;
+    const now = el.getBoundingClientRect().top - S.scroller.getBoundingClientRect().top;
+    S.scroller.scrollTop += now - anchor.offset;
+    if (hold) holdAt(S, el, anchor.offset);
+}
+
+/**
+ * T82：楼层用 content-visibility 省排版，没进过视口的楼先按估计高度占位。程序跳过去时目标楼还没排版，
+ * 浏览器的滚动锚定不认它，接下来一两帧上方的楼长到真实高度，目标就被推走。这里在之后几帧把目标楼拉回原位，
+ * 连续两帧不用再拉就停；人一动滚轮 / 触摸 / 按键 / 按下鼠标就放手，不跟人抢。
+ */
+function holdAt(session, el, offset) {
+    const hold = { el, offset, frames: 0, still: 0 };
+    session.hold = hold;
+    const step = () => {
+        if (S !== session || session.hold !== hold || !el.isConnected) return;
+        const now = el.getBoundingClientRect().top - session.scroller.getBoundingClientRect().top;
+        if (Math.abs(now - offset) > 1) { session.scroller.scrollTop += now - offset; hold.still = 0; } else hold.still++;
+        if (hold.still < 2 && ++hold.frames < 12) requestAnimationFrame(step);
+        else session.hold = null;
+    };
+    requestAnimationFrame(step);
+}
+
+function rerender(anchor) {
+    if (!S.handle?.total) return;
+    const index = anchor?.index ?? 0;
+    jumpTo(index);
+    if (anchor) restoreAnchor(anchor, { hold: true });
+}
+
+/** 跳到某楼（零基）：只渲染它所在的一批，再按需接上前后批。swipe 给了就切到那个候选。 */
+function jumpTo(index, { swipe = null } = {}) {
+    const session = S;
+    if (!session?.handle?.total) return;
+    closePopover(session);
+    index = Math.min(session.handle.total - 1, Math.max(0, index));
+    if (Number.isInteger(swipe)) {
+        session.swipeView.set(index, swipe);
+        const model = session.handle.getMessage(index);
+        if (swipe >= 0 && swipe < model.swipes.length) rememberSwipe(session.chatKey, index, swipe, swipe === model.swipeId);
+    }
+    const pageIndex = Math.floor(index / PAGE_SIZE);
+    dropPrebuilt(session); // 跳楼 / 重排：重新建，预建的按旧条件作废
+    const nodes = pageNodes(pageIndex);
+    session.chat.replaceChildren(...nodes);
+    session.marks.sweep();
+    session.firstPage = session.lastPage = pageIndex;
+    let target = floorEl(index);
+    if (target && !isShown(target)) {
+        // 目标是被隐藏的用户楼：落到它那段的折叠条上。
+        target = session.chat.querySelector(`.stcr-fold[data-run="${target.dataset.run}"]`) ?? target;
+    }
+    session.scroller.scrollTop = 0;
+    if (target) session.scroller.scrollTop = target.getBoundingClientRect().top - session.scroller.getBoundingClientRect().top - 8;
+    if (target) holdAt(session, target, target.getBoundingClientRect().top - session.scroller.getBoundingClientRect().top);
+    paintNodes(nodes);
+    ensureWindow();
+    updateProgress();
+}
+
+/** 保持"视口上下各有 1.5 屏内容"，DOM 至多 MAX_PAGES 批，多的释放（NF2）。 */
+function ensureWindow() {
+    const session = S;
+    if (!session?.handle || session.firstPage < 0) return;
+    const { scroller, handle } = session;
+    for (let guard = 0; guard < 6; guard++) {
+        const { scrollTop, scrollHeight, clientHeight } = scroller;
+        const nearBottom = scrollHeight - scrollTop - clientHeight < clientHeight * EDGE_SCREENS;
+        const nearTop = scrollTop < clientHeight * EDGE_SCREENS;
+        let nodes;
+        if (nearBottom && session.lastPage < handle.pageCount - 1) {
+            nodes = pageNodes(++session.lastPage);
+            session.chat.append(...nodes);
+        } else if (nearTop && session.firstPage > 0) {
+            const anchor = captureAnchor();
+            nodes = pageNodes(--session.firstPage);
+            session.chat.prepend(...nodes);
+            restoreAnchor(anchor);
+        } else break;
+        paintNodes(nodes);
+        trimWindow();
+    }
+    schedulePrebuild(session);
+}
+
+function trimWindow() {
+    const session = S;
+    let trimmed = false;
+    while (session.lastPage - session.firstPage + 1 > MAX_PAGES) {
+        const anchor = captureAnchor();
+        const anchorPage = anchor ? Math.floor(anchor.index / PAGE_SIZE) : session.firstPage;
+        const dropFirst = anchorPage - session.firstPage > session.lastPage - anchorPage;
+        const page = dropFirst ? session.firstPage++ : session.lastPage--;
+        for (const node of session.chat.querySelectorAll(`:scope > [data-page="${page}"]`)) node.remove();
+        if (dropFirst) restoreAnchor(anchor);
+        trimmed = true;
+    }
+    if (trimmed) session.marks.sweep();
+}
+
+/** 分页模式翻一屏；上下各留一行重叠，避免被切断的那行两页都看不全。 */
+function flip(direction) {
+    const session = S;
+    if (!session?.handle?.total) return;
+    const { scroller } = session;
+    const overlap = Math.min(48, Math.max(24, parseFloat(getComputedStyle(session.chat).fontSize) * 1.8));
+    const step = Math.max(80, scroller.clientHeight - overlap);
+    const before = scroller.scrollTop;
+    scroller.scrollTop = before + direction * step;
+    if (scroller.scrollTop === before) {
+        ensureWindow();
+        scroller.scrollTop = scroller.scrollTop + direction * step;
+        if (Math.abs(scroller.scrollTop - before) < 1) { say(direction > 0 ? '已经是最后一页' : '已经是第一页'); return; }
+    }
+    session.chat.classList.remove('stcr-flip');
+    void session.chat.offsetWidth;
+    session.chat.classList.add('stcr-flip');
+    ensureWindow();
+    updateProgress();
+}
+
+/**
+ * 底部进度："第 128–131 楼 · 共 312 楼 · 41%"；顺手记住阅读位置、更新跟随条。
+ * seen：可见楼集合算好的 {first, last, top}（滚动时，T82）；不给就当场量。
+ */
+function updateProgress(seen = null) {
+    const session = S;
+    if (!session) return;
+    const total = session.handle?.total ?? 0;
+    let first = seen?.first ?? null, last = seen?.last ?? null;
+    if (total && !seen) {
+        const rect = session.scroller.getBoundingClientRect();
+        for (const el of renderedFloors()) {
+            if (!isShown(el)) continue;
+            const r = el.getBoundingClientRect();
+            if (r.bottom <= rect.top + 16) continue; // 只露出一条缝的楼不算
+            if (r.top >= rect.bottom - 16) break;
+            const index = Number(el.getAttribute('mesid'));
+            first ??= index;
+            last = index;
+        }
+    }
+    updateFollower(seen ? seen.top ?? null : undefined);
+    const text = first === null ? '' : progressText(first, last, total);
+    const percent = first === null ? null : Math.min(100, Math.round(((last + 1) / total) * 100));
+    const setText = (el, value) => { if (el.textContent !== value) el.textContent = value; };
+    setText(session.progressBtn, text);
+    setText(session.topPercent, percent === null ? '' : `${percent}%`);
+    const width = percent === null ? '0' : `${percent}%`;
+    if (session.progressLine.style.width !== width) session.progressLine.style.width = width;
+    if (first !== null) setReadPosition(session.chatKey, first, { title: session.handle.title, owner: session.owner });
+}
+
+/** 视口顶端正在读的那一楼（露出一条缝的不算）；没有返回 null。 */
+function currentFloor() {
+    const session = S;
+    if (!session?.handle?.total) return null;
+    const view = session.scroller.getBoundingClientRect();
+    for (const el of renderedFloors()) {
+        if (!isShown(el)) continue;
+        if (el.getBoundingClientRect().bottom > view.top + 16) return el;
+    }
+    return null;
+}
+
+/**
+ * 楼层胶囊（T80，取代 T21 的跟随条；反馈 2、8）：平时是一枚竖着的细胶囊，写着视口顶端这一楼的名字和候选序号 2/5；
+ * 悬停或点按展开一列按钮：上一楼、回到这一楼开头、下一楼、换候选、收藏。
+ * 正文列外侧的空白放得下就停在列旁（左 / 右在 Aa → 显示里选），绝不压字；放不下（手机、窄窗口）贴正文区边缘。
+ * 展开是往下长的一列，宽度和胶囊差不多，不往字上盖。
+ */
+function updateFollower(known = undefined) {
+    const session = S;
+    const follow = session?.follow;
+    if (!follow) return;
+    const target = known === undefined ? currentFloor() : known;
+    if (!target) { follow.hidden = true; setFollowOpen(false); return; }
+    const index = Number(target.getAttribute('mesid'));
+    const swipe = Number(target.dataset.swipe);
+    const floorMarked = target.classList.contains('stcr-floor-bookmarked');
+    const swipeMarked = target.classList.contains('stcr-swipe-bookmarked');
+    const key = `${session.chatKey}:${index}:${swipe}:${floorMarked}:${swipeMarked}`;
+    if (follow.dataset.key !== key) {
+        const model = session.handle.getMessage(index);
+        const many = model.swipes.length > 1;
+        const name = redactString(model.name, S.chatKey) || `第 ${index + 1} 楼`;
+        // 多候选的楼收藏"这个候选"（星，和楼层工具条一致），单候选的收藏整楼（书签）
+        const on = many ? swipeMarked : floorMarked;
+        const mark = many
+            ? iconButton('fa-star', on ? `取消收藏第 ${swipe + 1} 个候选` : `收藏这个候选（第 ${swipe + 1} 个）`, { 'data-act': 'bookmark-swipe', 'data-index': index, 'aria-pressed': String(on) })
+            : iconButton('fa-bookmark', on ? '取消收藏这一楼' : '收藏这一楼（B）', { 'data-act': 'bookmark-floor', 'data-index': index, 'aria-pressed': String(on) });
+        mark.classList.toggle('stcr-on', on);
+        if (!on) mark.querySelector('i').classList.replace('fa-solid', 'fa-regular');
+        const open = follow.classList.contains('stcr-follow--open');
+        // replaceChildren 会把 null 写成文字"null"，先滤掉
+        // 验收后：换候选 ‹ 2/5 › 收起时也在胶囊上，不用先展开（竖排：上一个在上，下一个在下）
+        follow.replaceChildren(
+            h('div', { class: 'stcr-follow-pill' }, ...[
+                h('button', { type: 'button', class: 'stcr-btn stcr-follow-head', 'data-act': 'follow-toggle', 'aria-expanded': String(open),
+                    title: `第 ${index + 1} 楼 · ${name}（悬停或点按：上一楼 / 下一楼）` },
+                ...[h('span', { class: 'stcr-follow-name', text: name }),
+                    // 多候选楼的"已收藏这个候选"由候选数字右上的小星表示（.stcr-swipe-star），这里只标整楼书签
+                    on && !many ? h('i', { class: 'fa-solid fa-bookmark stcr-follow-dot', 'aria-hidden': 'true' }) : null].filter(Boolean)),
+                many ? buildSwipeControl(model, swipe) : null,
+            ].filter(Boolean)),
+            h('div', { class: 'stcr-follow-tools' }, ...[
+                iconButton('fa-arrow-up', '上一楼（[）', { 'data-act': 'floor-prev', 'data-index': index, disabled: index === 0 }),
+                iconButton('fa-arrows-up-to-line', '回到这一楼开头', { 'data-act': 'follow-top', 'data-index': index }),
+                iconButton('fa-arrow-down', '下一楼（]）', { 'data-act': 'floor-next', 'data-index': index, disabled: index >= session.handle.total - 1 }),
+                target.matches('.stcr-mes--system') ? null : mark,
+            ].filter(Boolean)));
+        follow.dataset.key = key;
+        follow.hidden = false;
+        placeFollower(session); // 换了楼（胶囊里的字变了）才重算位置；窗口 / 列宽变化由 trackVisibleFloors 的 ResizeObserver 管
+    }
+    follow.classList.toggle('stcr-swipe-bookmarked', swipeMarked); // 展开后候选数字右上的小星
+    if (follow.hidden) { follow.hidden = false; placeFollower(session); }
+}
+
+/** 胶囊的横向位置：列外空白够就贴着列外侧，不够就贴正文区边缘（logic.followPlacement）。 */
+function placeFollower(session) {
+    const { follow, scroller, chat } = session;
+    const area = scroller.getBoundingClientRect(), column = chat.getBoundingClientRect();
+    const gutter = (scroller.offsetWidth - scroller.clientWidth) / 2; // 滚动条（两侧对称预留）
+    const side = follow.dataset.side === 'left' ? 'left' : 'right';
+    const width = matchMedia('(max-width: 599px)').matches ? 30 : 34; // 与 style.css 里胶囊的宽度一致；不量，省一次强制排版
+    const spot = followPlacement({ areaLeft: area.left + gutter, areaRight: area.right - gutter, columnLeft: column.left, columnRight: column.right, side, width });
+    follow.classList.toggle('stcr-follow--edge', spot.mode === 'edge');
+    const left = `${Math.round(spot.left + gutter)}px`;
+    if (follow.style.left !== left) follow.style.left = left;
+}
+
+function setFollowOpen(open) {
+    const follow = S?.follow;
+    if (!follow || follow.classList.contains('stcr-follow--open') === open) return;
+    follow.classList.toggle('stcr-follow--open', open);
+    follow.querySelector('.stcr-follow-head')?.setAttribute('aria-expanded', String(open));
+}
+
+/** 上一楼 / 下一楼（T80，反馈 2）：跳过收起来的楼，把那一楼的名字行放到视口顶端；还没渲染到就整批跳过去。 */
+function stepFloor(from, delta) {
+    const session = S;
+    const total = session?.handle?.total ?? 0;
+    if (!Number.isInteger(from) || !total) return;
+    for (let i = from + delta; i >= 0 && i < total; i += delta) {
+        const el = floorEl(i);
+        if (!el) { jumpTo(i); return; }
+        if (isShown(el)) { scrollFloorTop(el); return; }
+    }
+    say(delta > 0 ? '已经是最后一楼' : '已经是第一楼');
+}
+
+// ───────────────────────── 楼层操作 ─────────────────────────
+
+/** 键盘命令作用的楼：鼠标所在楼（还在视口里），否则视口顶端第一楼。 */
+function keyTarget() {
+    const hovered = S.hoverIndex !== null ? floorEl(S.hoverIndex) : null;
+    if (hovered && isShown(hovered)) {
+        const rect = hovered.getBoundingClientRect(), view = S.scroller.getBoundingClientRect();
+        if (rect.bottom > view.top && rect.top < view.bottom) return hovered;
+    }
+    const anchor = captureAnchor();
+    return anchor ? floorEl(anchor.index) : null;
+}
+
+/** 把这一楼的名字行放到视口顶端（从跟随条切候选后，从头读新候选）。 */
+function scrollFloorTop(mes) {
+    const view = S.scroller.getBoundingClientRect();
+    S.scroller.scrollTop += mes.getBoundingClientRect().top - view.top - 8;
+    holdAt(S, mes, mes.getBoundingClientRect().top - view.top);
+    ensureWindow();
+    updateProgress();
+}
+
+function stepSwipe(mes, delta) {
+    const current = Number(mes.dataset.swipe);
+    setSwipe(mes, current + delta);
+}
+
+/** 切候选：只改阅读器视图；名字行在屏幕上的位置保持不动（02 §5.1）。 */
+function setSwipe(mes, next) {
+    const session = S;
+    if (!mes || !session?.handle) return;
+    const index = Number(mes.getAttribute('mesid'));
+    const model = session.handle.getMessage(index);
+    if (!Number.isInteger(next) || next < 0 || next >= model.swipes.length || next === Number(mes.dataset.swipe)) return;
+    const before = mes.getBoundingClientRect().top;
+    const pinned = mes.classList.contains('stcr-toolbar-pinned');
+    session.marks.unpaintFloor(mes);
+    fillFloor(floorContext(), mes, model, next);
+    mes.classList.toggle('stcr-toolbar-pinned', pinned);
+    session.scroller.scrollTop += mes.getBoundingClientRect().top - before;
+    mes.classList.remove('stcr-swipe-fade');
+    void mes.offsetWidth;
+    mes.classList.add('stcr-swipe-fade');
+    session.swipeView.set(index, next);
+    rememberSwipe(session.chatKey, index, next, next === model.swipeId);
+    if (!mes.classList.contains('stcr-mes--broken')) session.marks.paintFloor(mes); // 原样显示的候选不画划线（原文偏移对不上）
+    ensureWindow();
+    updateProgress();
+}
+
+function toggleReasoning(mes) {
+    const details = mes?.querySelector(':scope > .mes_block > .mes_reasoning_details');
+    if (!details) return;
+    const open = !details.open;
+    details.open = open;
+    S.reasoning.set(Number(mes.getAttribute('mesid')), open);
+    if (!open) {
+        // 从长思维链底部"收起"时，别让人找不到自己在哪：思考行滚回视口顶端。
+        const view = S.scroller.getBoundingClientRect();
+        const top = details.getBoundingClientRect().top;
+        if (top < view.top) S.scroller.scrollTop += top - view.top - 8;
+    }
+    updateProgress();
+}
+
+async function copyFloor(mes) {
+    const ok = await copyText(floorPlainText(mes));
+    say(ok ? '已复制本楼文字' : '复制失败，请手动选中复制');
+}
+
+/** 原样显示的楼：复制错误信息（版本、楼号、堆栈；不含正文），同时再打一遍到控制台。 */
+async function copyFault(mes) {
+    const fault = floorFault(mes);
+    if (!fault) return;
+    let version = '';
+    try { version = await getVersion(); } catch { /* 版本号拿不到也照样复制 */ }
+    console.error('[st-reader] 显示失败：', fault.error);
+    const ok = await copyText(faultReport(fault, version));
+    say(ok ? '已复制错误信息（不含正文），可以直接贴给作者' : '复制失败，请打开浏览器控制台查看错误');
+}
+
+async function copyCode(button) {
+    const code = button.closest('pre')?.querySelector('code');
+    if (!code) return;
+    const ok = await copyText(visibleText(code));
+    const icon = button.querySelector('i');
+    if (ok && icon) {
+        icon.className = 'fa-solid fa-check';
+        setTimeout(() => { icon.className = 'fa-solid fa-copy'; }, 1500);
+    } else if (!ok) say('复制失败，请手动选中复制');
+}
+
+// ───────────────────────── HTML 与代码的脱敏复制、截图（T44b） ─────────────────────────
+
+/** 名字与规则作用范围：单聊 = 这个角色；群聊 = 这一楼的发言成员。 */
+function htmlMaskBase(session, model) {
+    const header = session.handle?.header ?? {};
+    const key = session.chatKey ? parseChatKey(session.chatKey) : null;
+    const group = !!session.handle?.isGroup;
+    return {
+        userName: header.userName ?? '',
+        characterName: group ? (model && !model.isUser ? model.name : '') : header.characterName ?? '',
+        isGroup: group,
+        avatarUrl: group ? (model && !model.isUser ? model.originalAvatar ?? undefined : undefined) : key?.avatarUrl ?? undefined,
+    };
+}
+
+/** 截图 / 复制脱敏版用：每次现读屏蔽词、规则、图片（工作台里可能刚改过）。遮盖按字数（和阅读器里的涂黑一样）。 */
+async function htmlMaskOptions(session, model, { autoNames = getPrefs().autoNames, myRules = true } = {}) {
+    const [words, rules, assets] = await Promise.all([store.maskWords.list(), store.replaceRules.list(), store.assets.list()]);
+    return { ...htmlMaskBase(session, model), maskWords: words, rules, assets,
+        autoReplaceNames: autoNames, applyReplaceRules: myRules, maskStyle: { kind: 'bar', uniform: false } };
+}
+
+/** 代码块的原文（脱敏显示开着时，正文里是换过的显示段；复制脱敏版要从原文出发）。 */
+function originalCode(code) {
+    const clone = code.cloneNode(true);
+    for (const node of clone.querySelectorAll('.stcr-rd, .stcr-code-tools')) node.remove();
+    return clone.textContent ?? '';
+}
+
+/**
+ * 一段代码的脱敏版（F10b）：像 HTML 的只换文字节点、不碰标签和属性（core maskHtmlString）；其余当纯文本换。
+ * maskHtmlString 会补成完整文档：原文不是完整文档时，只取回 head + body 里的内容，保持原来的片段样子。
+ */
+async function maskedCodeText(text, model) {
+    const options = await htmlMaskOptions(S, model);
+    if (!/<[a-z!][^>]*>/i.test(text)) {
+        const { maskCodeText } = await import('../core/cardExport.js');
+        return maskCodeText(text, options);
+    }
+    const masked = await maskHtmlString(text, options);
+    if (/<(html|body|!doctype)\b/i.test(text)) return masked;
+    // 取回片段（I034）：用 <template> 解析——内容落在没有浏览上下文的惰性文档里，不执行脚本、不加载图片 / iframe；
+    // html/head/body 外壳标签被丢掉，里面的节点按原顺序保留。不再用宿主 DOMParser（MDN：惰性解析仍可能加载资源）。
+    const template = document.createElement('template');
+    template.innerHTML = masked;
+    return template.innerHTML;
+}
+
+async function copyMasked(text, mes, button) {
+    const session = S;
+    try {
+        const model = mes && session.handle ? session.handle.getMessage(Number(mes.getAttribute('mesid'))) : null;
+        const masked = await maskedCodeText(text, model);
+        if (S !== session) return;
+        const ok = await copyText(masked);
+        say(ok ? (getPrefs().autoNames ? '已复制脱敏版：屏蔽词遮住了，名字和替换规则都换好了' : '已复制脱敏版：屏蔽词遮住了，替换规则换好了（自动名字已在 Aa 里关掉）') : '复制失败，请手动选中复制');
+        const icon = button?.querySelector('i');
+        if (ok && icon) { icon.className = 'fa-solid fa-check'; setTimeout(() => { icon.className = 'fa-solid fa-user-secret'; }, 1500); }
+    } catch (error) {
+        console.error('[st-reader] 复制脱敏版失败', error);
+        say(`复制脱敏版失败：${describeStoreError(error)}`);
+    }
+}
+
+function copyCodeMasked(button) {
+    const code = button.closest('pre')?.querySelector('code');
+    if (code) copyMasked(originalCode(code), button.closest('.mes'), button);
+}
+
+function copyHtmlBlockMasked(button) {
+    const info = S.html.entryFor(button);
+    if (info) copyMasked(info.html, button.closest('.mes'), button);
+}
+
+function openHtmlShot(button) {
+    const info = S.html.entryFor(button);
+    if (info) S.htmlShot.open(info);
+}
+
+function toggleFold(button) {
+    const open = button.getAttribute('aria-expanded') !== 'true';
+    button.setAttribute('aria-expanded', String(open));
+    for (const el of S.chat.querySelectorAll(`:scope > .mes[data-run="${button.dataset.run}"]`)) el.classList.toggle('stcr-user-shown', open);
+    updateProgress();
+}
+
+// ───────────────────────── 小浮层 ─────────────────────────
+
+/** 同一时间只开一个小浮层。onDismiss：被点外面/换浮层关掉时调用（批注框借此"点外面即保存"）。 */
+function setPopover(el, { onDismiss } = {}) {
+    const session = S;
+    if (!session) return;
+    if (session.popover && session.popover !== el) closePopover(session);
+    if (!el.isConnected) session.root.append(el);
+    session.popover = el;
+    session.popoverDismiss = onDismiss ?? null;
+}
+
+/** cancel=true：Esc / 取消 / 滚动收起，不触发 onDismiss。 */
+function closePopover(session, { cancel = false } = {}) {
+    if (!session?.popover) return;
+    const dismiss = session.popoverDismiss;
+    session.popover.remove();
+    session.popover = null;
+    session.popoverDismiss = null;
+    if (dismiss && !cancel) dismiss();
+}
+
+function placePopover(popover, anchorEl, { above = false } = {}) {
+    const root = S.root.getBoundingClientRect();
+    const rect = anchorEl.getBoundingClientRect();
+    S.root.append(popover);
+    const width = popover.offsetWidth;
+    const left = Math.min(Math.max(8, rect.right - root.left - width), root.width - width - 8);
+    popover.style.left = `${left}px`;
+    if (above) popover.style.bottom = `${root.bottom - rect.top + 6}px`;
+    else popover.style.top = `${rect.bottom - root.top + 6}px`;
+    setPopover(popover);
+}
+
+/** 点候选数字：列出每个候选的时间与开头一句，点即跳（02 §5.1）。收藏过的候选有星，有划线的写 ✎N。 */
+function openSwipeList(mes, button, { fromFollow = false } = {}) {
+    if (S.popover?.dataset.for === mes.getAttribute('mesid')) { closePopover(S); return; }
+    closePopover(S);
+    const index = Number(mes.getAttribute('mesid'));
+    const model = S.handle.getMessage(index);
+    const shown = Number(mes.dataset.swipe);
+    const previews = swipePreviews(model.swipes.map(swipe => swipe.text));
+    const notes = new Map();
+    for (const record of S.marks.records()) {
+        if (record.anchor.mesIndex === index && !record.orphan) notes.set(record.anchor.swipeIndex, (notes.get(record.anchor.swipeIndex) ?? 0) + 1);
+    }
+    const popover = h('div', { class: 'stcr-popover stcr-swipe-list', role: 'listbox', 'aria-label': '选择候选', 'data-for': index, 'data-follow': fromFollow ? '1' : '0' },
+        ...model.swipes.map(swipe => h('button', { type: 'button', role: 'option', class: `stcr-btn stcr-swipe-item${swipe.index === shown ? ' stcr-on' : ''}`,
+            'aria-selected': String(swipe.index === shown), 'data-act': 'swipe-pick', 'data-index': index, 'data-swipe': swipe.index },
+        h('span', { class: 'stcr-swipe-item-num', text: String(swipe.index + 1) }),
+        h('span', { class: 'stcr-swipe-item-time', text: formatStamp(swipe.sendDate).replace(/^.*日 /, '') }),
+        h('span', { class: 'stcr-swipe-item-text', text: redactString(previews[swipe.index], S.chatKey) || '（空）' }),
+        notes.get(swipe.index) ? h('span', { class: 'stcr-swipe-item-notes', title: `这个候选上有 ${notes.get(swipe.index)} 条划线`, text: `✎${notes.get(swipe.index)}` }) : null,
+        S.marks.isBookmarked(index, swipe.index) ? h('i', { class: 'fa-solid fa-star stcr-swipe-item-star', title: '已收藏这个候选', 'aria-label': '已收藏' }) : null,
+        swipe.index === model.swipeId ? h('span', { class: 'stcr-swipe-dot', title: 'ST 里现在采用的是这个候选' }) : null)));
+    placePopover(popover, button);
+    popover.querySelector('.stcr-on')?.focus({ preventScroll: true });
+}
+
+/** 跳到第 N 楼的小输入框。 */
+function openJump() {
+    const session = S;
+    if (!session?.handle?.total) return;
+    if (session.popover?.classList.contains('stcr-jump')) { closePopover(session); return; }
+    closePopover(session);
+    const input = h('input', { type: 'number', min: 1, max: session.handle.total, class: 'text_pole stcr-jump-input', 'aria-label': '楼号', placeholder: `1–${session.handle.total}` });
+    const form = h('form', { class: 'stcr-popover stcr-jump' },
+        h('label', {}, '跳到第 ', input, ' 楼'),
+        h('button', { type: 'submit', class: 'stcr-btn stcr-text-btn', text: '跳转' }));
+    form.addEventListener('submit', event => {
+        event.preventDefault();
+        const index = parseJumpInput(input.value, session.handle.total);
+        if (index === null) { say(`请输入 1 到 ${session.handle.total} 之间的楼号`); input.select(); return; }
+        closePopover(session);
+        jumpTo(index);
+        session.scroller.focus({ preventScroll: true });
+    });
+    placePopover(form, session.progressBtn, { above: true });
+    input.focus();
+}
