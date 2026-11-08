@@ -1,4 +1,5 @@
 // ST Reader — AGPL-3.0
+// readandrepo 修改：2026-11-08，卡片选区增加四色划线、换色与取消，导出保留划线。
 // 卡片工作台（T23a、02 §6.1–6.3 + §6.4 第一层、F2/F2a）。叠在阅读器之上，关掉回到原位置。
 // 预览所见即所得：片段来自 core 的已脱敏副本（cardPieces.js），遮盖用 core 的 wrapMaskSpans，
 // 导出把同一个预览节点交给 exportCard（replaceNames:false：片段已替换过名字、不再绑定原文）。
@@ -10,6 +11,8 @@ import { exportCard, ruleWords, wrapMaskSpans } from '../core/cardExport.js';
 import { store } from '../core/store.js';
 import { getVersion } from '../core/updateService.js';
 import { buildPieces, createPieceCache, findThoughts, scrubNote } from './cardPieces.js';
+import { createCardMarks } from './cardMarks.js';
+import { COLORS } from './marks.js';
 import { colorPicker, readableOn } from './colorPicker.js';
 import { getPrefs } from './prefs.js';
 import { copyText, h, iconButton } from './dom.js';
@@ -73,6 +76,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             permanent: [], temp: [], cache: createPieceCache(), pieces: [], mappings: [], thoughts: [], card: null,
             token: 0, exporting: false, urls: [], words: [], suppressClick: false, saveTimer: 0, resize: null,
             wordStyles: {}, tempStyles: {}, menu: null, rules: [], assets: [], scopes: null, rulesPage: null,
+            marks: createCardMarks(), selectionTimer: 0, selectionListener: null,
         };
         st = mine;
         root.append(els.studio);
@@ -144,7 +148,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const status = h('div', { class: 'stcr-studio-status', role: 'status', 'aria-live': 'polite' });
         const stage = h('div', { class: 'stcr-studio-stage' },
             slot, hover, status,
-            h('p', { class: 'stcr-studio-tip', text: '点预览里的词 = 临时遮住（只对这张卡有效）；拖选一串字也能一次遮住。点已遮住的地方，可以单独换它的样子、取消或加入永久。' }),
+            h('p', { class: 'stcr-studio-tip', text: '拖选正文可选择四色划线或临时遮住；点已有划线可换色或取消。划线只保留在当前卡片，导出 PNG 会带上。点普通词仍可直接遮住，点遮盖可调整样式。' }),
             // T73：导出在隔离副本里重画，美化楼偶尔会和预览有出入；说明 + 可复制的诊断（不含正文）
             h('details', { class: 'stcr-studio-diff' },
                 h('summary', { text: '预览与导出不一致？' }),
@@ -262,7 +266,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             addPermanent(mine, word).then(ok => { if (ok) els.wordInput.value = ''; });
         });
 
-        // 预览里悬停一个词 = 虚线框；点一下 = 临时遮住；拖选一串 = 一次遮住。
+        // 预览里点词仍可遮住；拖选先弹菜单。selectionchange 兼容手机长按与拖动选区手柄。
         let frame = 0, lastMove = null;
         els.stage.addEventListener('mousemove', event => {
             lastMove = event;
@@ -271,6 +275,15 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         });
         els.stage.addEventListener('mouseleave', () => { els.hover.hidden = true; });
         els.stage.addEventListener('mouseup', () => setTimeout(() => { if (alive()) onDragSelect(mine); }, 0));
+        const scheduleSelection = () => {
+            clearTimeout(mine.selectionTimer);
+            mine.selectionTimer = setTimeout(() => { if (alive()) onDragSelect(mine); }, 150);
+        };
+        els.stage.addEventListener('touchend', scheduleSelection, { passive: true });
+        els.stage.addEventListener('keyup', scheduleSelection);
+        // 桌面等 mouseup 再弹，避免缓慢拖选时菜单提前挡住鼠标。
+        mine.selectionListener = () => { if (matchMedia('(pointer: coarse)').matches) scheduleSelection(); };
+        document.addEventListener('selectionchange', mine.selectionListener);
         els.stage.addEventListener('scroll', () => { els.hover.hidden = true; closeMenu(mine); }, { passive: true });
         els.side.addEventListener('scroll', () => closeMenu(mine), { passive: true });
         mine.resize = new ResizeObserver(() => { if (alive()) fit(mine); });
@@ -376,8 +389,8 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
                 h('div', { class: 'mes_block' },
                     names ? h('div', { class: 'ch_name' }, h('span', { class: 'name_text' }, piece.name.cloneNode(true))) : null,
                     reasoning ? h('div', { class: 'stcr-card-reasoning' }, h('div', { class: 'stcr-card-reasoning-title', text: '思考过程' }),
-                        h('div', { class: 'mes_reasoning' }, piece.reasoning.cloneNode(true))) : null,
-                    piece.body ? h('div', { class: 'mes_text' }, piece.body.cloneNode(true)) : null)));
+                        h('div', { class: 'mes_reasoning', 'data-stcr-card-part': `${piece.index}:${piece.swipe}:reasoning` }, piece.reasoning.cloneNode(true))) : null,
+                    piece.body ? h('div', { class: 'mes_text', 'data-stcr-card-part': `${piece.index}:${piece.swipe}:body` }, piece.body.cloneNode(true)) : null)));
         }
         // 楼里自带的 <style> 只管它那一楼：卡片和阅读器同在一页，别让卡片里的样式改到底下的正文（T50）
         for (const text of chat.querySelectorAll('.mes_text')) scopeFloorStyles(text);
@@ -402,6 +415,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         fitStickerCounts(mine);
         contrastReplacements(mine.card);
         rasterizeReplacementIcons(mine);
+        mine.marks.paint(mine.card, mine.words);
         els.hover.hidden = true;
         closeMenu(mine);
         els.exportBtn.disabled = empty || mine.exporting;
@@ -961,7 +975,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     function onHover(mine, event) {
         const { els } = mine;
         if (!mine.card || mine.exporting || !event) return;
-        const mask = event.target.closest?.('.stcr-mask');
+        const mask = event.target.closest?.('.stcr-mask, .stcr-card-highlight');
         if (mask && mine.card.contains(mask)) { els.hover.hidden = true; return; }
         const found = !getSelection()?.toString() && mine.card.contains(event.target) ? wordUnder(mine, event.clientX, event.clientY) : null;
         if (!found) { els.hover.hidden = true; mine.card.classList.remove('stcr-card--pick'); return; }
@@ -980,27 +994,81 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     function onCardClick(mine, event) {
         if (mine.exporting) return;
         if (mine.suppressClick) { mine.suppressClick = false; return; }
+        // mouseup 后的 click 比异步选区处理更早，不能先把拖选终点的词涂黑。
+        const selection = getSelection();
+        if (selection?.rangeCount && !selection.isCollapsed && mine.card.contains(selection.anchorNode) && mine.card.contains(selection.focusNode)) return;
         const mask = event.target.closest('.stcr-mask');
         if (mask) {
             openMenu(mine, mine.words[Number(mask.dataset.stcrTw)], mask);
             return;
         }
+        const mark = event.target.closest('.stcr-card-highlight');
+        if (mark) { openMarkMenu(mine, mark.dataset.stcrCardMark, mark); return; }
         const found = wordUnder(mine, event.clientX, event.clientY);
         if (found && !mine.permanent.includes(found.text)) setTemp(mine, [...mine.temp, found.text]);
     }
 
-    /** 在预览里拖选了一串字：整串临时遮住。 */
+    function markColors(current, onPick, disabled = false) {
+        return h('div', { class: 'stcr-dots', role: 'group', 'aria-label': '划线颜色' },
+            ...COLORS.map(color => h('button', { type: 'button', class: `stcr-btn stcr-dot stcr-dot--${color.id}${color.id === current ? ' stcr-on' : ''}`,
+                'data-card-color': color.id, 'aria-label': `${color.label}色划线`, title: disabled ? '划线请在同一段正文里选' : `${color.label}色划线`,
+                disabled, onclick: () => onPick(color.id) })));
+    }
+
+    /** 点已有划线只调整这一处，不把同样的词全部标记，也不写阅读界面的批注。 */
+    function openMarkMenu(mine, id, anchor) {
+        const record = mine.marks.get(id);
+        if (!record || mine.exporting) return;
+        closeMenu(mine);
+        const repaint = () => { closeMenu(mine); mine.marks.paint(mine.card, mine.words); fit(mine); };
+        const menu = h('div', { class: 'stcr-popover stcr-mask-menu', role: 'dialog', 'aria-label': '卡片划线' },
+            h('div', { class: 'stcr-mask-menu-title', text: '这条划线（只在当前卡片）' }),
+            markColors(record.color, color => { if (mine.exporting) return; mine.marks.update(id, color); repaint(); }),
+            h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-card-mark-remove': '', text: '取消划线',
+                onclick: () => { if (mine.exporting) return; mine.marks.remove(id); repaint(); } }));
+        placeMenu(mine, menu, anchor);
+    }
+
+    /** 选区长短不限；遮盖仍沿用原来的 40 字限制，划线与遮盖分别判断。 */
     function onDragSelect(mine) {
+        if (mine.exporting) return;
         const selection = getSelection();
         if (!selection || selection.isCollapsed || !selection.rangeCount || !mine.card) return;
         const range = selection.getRangeAt(0);
         if (!mine.card.contains(range.startContainer) || !mine.card.contains(range.endContainer)) return;
+        const saved = range.cloneRange();
+        const captured = mine.marks.capture(mine.card, saved, mine.words);
         const word = cleanMaskWord(selection.toString());
-        selection.removeAllRanges();
+        if (!selection.toString().trim()) return;
+        const key = JSON.stringify(captured ? [captured.part, captured.start, captured.end] : [selection.toString()]);
+        if (mine.menu?.dataset.cardSelection === key) return;
+        closeMenu(mine);
         mine.suppressClick = true;
         setTimeout(() => { if (st === mine) mine.suppressClick = false; }, 0);
-        if (!word) { toast('一次最多遮 40 个字，请少选一些'); return; }
-        if (!mine.permanent.includes(word)) setTemp(mine, [...mine.temp, word]);
+        const menu = h('div', { class: 'stcr-popover stcr-mask-menu', role: 'dialog', 'aria-label': '对卡片选中的文字', 'data-card-selection': key },
+            h('div', { class: 'stcr-mask-menu-title', text: captured ? '划线颜色（只在当前卡片）' : '划线请在同一段正文里选' }),
+            markColors(null, color => {
+                if (mine.exporting || !saved.startContainer.isConnected) return;
+                mine.marks.add(captured, color);
+                selection.removeAllRanges();
+                closeMenu(mine);
+                mine.marks.paint(mine.card, mine.words);
+                mine.els.hover.hidden = true;
+                fit(mine);
+            }, !captured),
+            h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-card-selection-mask': '', text: '临时遮住',
+                disabled: !word, title: word ? '按右侧遮盖样式临时遮住' : '一次最多遮 40 个字', onclick: () => {
+                    if (mine.exporting || !word) return;
+                    selection.removeAllRanges();
+                    closeMenu(mine);
+                    if (!mine.permanent.includes(word)) setTemp(mine, [...mine.temp, word]);
+                } }));
+        menu.addEventListener('mousedown', event => event.preventDefault());
+        // 长选区的起点可能已滚出视口，优先贴着仍可见的末行，手机同样可点击。
+        const view = mine.els.stage.getBoundingClientRect();
+        const rects = [...saved.getClientRects()].filter(rect => rect.width && rect.height && rect.bottom > view.top && rect.top < view.bottom);
+        const rect = rects.at(-1) ?? saved.getBoundingClientRect();
+        placeMenu(mine, menu, { getBoundingClientRect: () => rect });
     }
 
     // ───────────── 导出 ─────────────
@@ -1061,6 +1129,8 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         st = null;
         mine.token++;
         clearTimeout(mine.saveTimer);
+        clearTimeout(mine.selectionTimer);
+        document.removeEventListener('selectionchange', mine.selectionListener);
         if (mine.saveTimer) store.settings.set(PREFS_KEY, { ...mine.prefs }).catch(() => {});
         mine.resize?.disconnect();
         mine.els.studio.remove();
