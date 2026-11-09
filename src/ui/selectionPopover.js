@@ -1,4 +1,5 @@
 // ST Reader — AGPL-3.0
+// readandrepo 修改：2026-11-09，选区可先加入集合，再把多段一起制作卡片。
 // 选中文字浮层（02 §1.5、F7/F2a）、点已有划线的浮层、批注输入框、批注气泡。
 // 全部挂在 #stcr_root 里（事件已在根节点截断，不会冒泡到 ST）。
 // "卡片"按钮（T23a）：可跨楼，跨楼时只有它能用。"屏蔽 ▾ → 设为替换词…"（T23b）：把这个词加进我的替换规则。
@@ -12,11 +13,11 @@ import { redactString } from './redact.js';
 const MASK_MAX = 30;
 
 /**
- * @param {{root:HTMLElement, marks:object, toast:(msg:string)=>void, onCard:(range:Range)=>void, getChatKey:()=>string|null, getAutoNames:()=>string[],
+ * @param {{root:HTMLElement, marks:object, toast:(msg:string)=>void, onCard:(range:Range)=>void, onAddSelection?:(range:Range)=>void, getSelectionCount?:()=>number, getChatKey:()=>string|null, getAutoNames:()=>string[],
  *   setPopover:(el:HTMLElement, opts?:{onDismiss?:()=>void})=>void, closePopover:(opts?:{cancel?:boolean})=>void}} deps
  *   onDismiss：浮层被"点外面/换别的浮层"关掉时调用；closePopover({cancel:true})（Esc、取消）不调用。
  */
-export function createSelectionUi({ root, marks, toast, onCard, getChatKey, getAutoNames = () => [], setPopover, closePopover }) {
+export function createSelectionUi({ root, marks, toast, onCard, onAddSelection, getSelectionCount = () => 0, getChatKey, getAutoNames = () => [], setPopover, closePopover }) {
     let bubble = null;
 
     /** 把浮层放在一个屏幕矩形的上方（放不下就放下方）；手机贴底。 */
@@ -69,12 +70,15 @@ export function createSelectionUi({ root, marks, toast, onCard, getChatKey, getA
         const canMark = !!container;
         const canMask = canMark && text.length > 0 && text.length <= MASK_MAX && !/\n/.test(text);
         const saved = range.cloneRange();
-        const pop = h('div', { class: 'stcr-popover stcr-sel-pop', role: 'toolbar', 'aria-label': '对选中的文字' },
+        const pop = h('div', { class: 'stcr-popover stcr-sel-pop stcr-sel-pop--collect', role: 'toolbar', 'aria-label': '对选中的文字' },
             colorDots(null, color => mark(color), !canMark),
             h('span', { class: 'stcr-sep', 'aria-hidden': 'true' }),
             h('button', { type: 'button', class: 'stcr-btn stcr-pop-btn', disabled: !canMark, title: canMark ? '划线并写批注' : '划线请在同一段正文里选', onclick: () => mark('yellow', true) },
                 h('i', { class: 'fa-solid fa-pen', 'aria-hidden': 'true' }), '批注'),
-            h('button', { type: 'button', class: 'stcr-btn stcr-pop-btn', title: '用选中的文字做分享卡片（可以跨楼选）', onclick: () => card() },
+            onAddSelection ? h('button', { type: 'button', class: 'stcr-btn stcr-pop-btn', 'data-selection-add': '',
+                title: '记下这一段，继续选别处；最后合成一张卡片', onclick: () => { closePopover(); onAddSelection(saved); } },
+                h('i', { class: 'fa-solid fa-plus', 'aria-hidden': 'true' }), '加入选段') : null,
+            h('button', { type: 'button', class: 'stcr-btn stcr-pop-btn', title: getSelectionCount() ? '将当前选区和已收集的选段一起制作卡片' : '用选中的文字做分享卡片（可以跨楼选）', onclick: () => card() },
                 h('i', { class: 'fa-solid fa-image', 'aria-hidden': 'true' }), '卡片'),
             h('span', { class: 'stcr-pop-split' },
                 h('button', { type: 'button', class: 'stcr-btn stcr-pop-btn', disabled: !canMask,

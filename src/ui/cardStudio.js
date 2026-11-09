@@ -1,5 +1,6 @@
 // ST Reader — AGPL-3.0
 // readandrepo 修改：2026-11-08，卡片选区增加四色划线、换色与取消，导出保留划线。
+// readandrepo 修改：2026-11-09，直接编辑分享卡片的预览文字。
 // 卡片工作台（T23a、02 §6.1–6.3 + §6.4 第一层、F2/F2a）。叠在阅读器之上，关掉回到原位置。
 // 预览所见即所得：片段来自 core 的已脱敏副本（cardPieces.js），遮盖用 core 的 wrapMaskSpans，
 // 导出把同一个预览节点交给 exportCard（replaceNames:false：片段已替换过名字、不再绑定原文）。
@@ -31,6 +32,8 @@ const TEMPLATES = [
 const MASKS = [{ id: 'bar', label: '涂黑' }, { id: 'block', label: '色块' }, { id: 'sticker', label: '小图案' }];
 const PAPER_RED = '#8a3a2e';
 const DIGEST_BLUE = '#1b88ee';
+const EDIT_PART = '[data-stcr-card-edit]';
+const EDIT_ATOMIC = '.stcr-mask, [data-stcr-protected], style, img, svg';
 
 /** 存储里的 {词: {mask, icon|asset|color}} → 只留合法项；用到的图片已被删掉就退回默认图案。 */
 function cleanWordStyles(raw, assets) {
@@ -77,6 +80,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             token: 0, exporting: false, urls: [], words: [], suppressClick: false, saveTimer: 0, resize: null,
             wordStyles: {}, tempStyles: {}, menu: null, rules: [], assets: [], scopes: null, rulesPage: null,
             marks: createCardMarks(), selectionTimer: 0, selectionListener: null,
+            drafts: new Map(), editing: null, rebuilding: false,
         };
         st = mine;
         root.append(els.studio);
@@ -119,7 +123,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     async function refreshRules(mine) {
         try {
             const [rules, assets] = await Promise.all([store.replaceRules.list(), store.assets.list()]);
-            if (st !== mine) return;
+            if (st !== mine || mine.editing || mine.drafts.size) return;
             mine.rules = rules;
             setAssets(mine, assets);
         } catch (error) { toast(`规则读取失败：${error.message ?? error}`); return; }
@@ -128,26 +132,31 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         await rebuild(mine);
     }
 
-    function subtitle({ floors, kind }) {
+    function subtitle({ floors, kind, selectionCount }) {
         const first = floors[0].index + 1, last = floors.at(-1).index + 1;
         const where = first === last ? `第 ${first} 楼` : `第 ${first}–${last} 楼`;
-        return kind === 'floor' ? `${where} · 整楼` : kind === 'note' ? `${where} · 划线` : `${where} · 选段`;
+        return kind === 'floor' ? `${where} · 整楼` : kind === 'note' ? `${where} · 划线`
+            : selectionCount > 1 ? `${where} · ${selectionCount} 段` : `${where} · 选段`;
     }
 
     function buildDom() {
         const exportBtn = h('button', { type: 'button', class: 'stcr-btn stcr-studio-export', 'data-studio': 'export' },
             h('i', { class: 'fa-solid fa-download', 'aria-hidden': 'true' }), h('span', { class: 'stcr-studio-export-label', text: '导出 PNG' }));
         const sub = h('span', { class: 'stcr-studio-sub' });
+        const editBtn = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn stcr-studio-edit', 'data-studio': 'edit', disabled: true, text: '编辑内容' });
         const head = h('header', { class: 'stcr-studio-head' },
             iconButton('fa-xmark', '关闭（Esc）', { 'data-studio': 'close' }),
-            h('h2', { class: 'stcr-studio-title', text: '分享卡片' }), sub, exportBtn);
+            h('h2', { class: 'stcr-studio-title', text: '分享卡片' }), sub, editBtn, exportBtn);
 
         const scaler = h('div', { class: 'stcr-card-scaler' });
         const slot = h('div', { class: 'stcr-card-slot' }, scaler);
         const hover = h('div', { class: 'stcr-card-hover', hidden: true, 'aria-hidden': 'true' });
         const status = h('div', { class: 'stcr-studio-status', role: 'status', 'aria-live': 'polite' });
+        const editHint = h('span', { role: 'status' });
+        const resetEdit = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-studio': 'reset-edit', text: '恢复原文' });
+        const editInfo = h('div', { class: 'stcr-studio-edit-info', hidden: true }, editHint, resetEdit);
         const stage = h('div', { class: 'stcr-studio-stage' },
-            slot, hover, status,
+            editInfo, slot, hover, status,
             h('p', { class: 'stcr-studio-tip', text: '拖选正文可选择四色划线或临时遮住；点已有划线可换色或取消。划线只保留在当前卡片，导出 PNG 会带上。点普通词仍可直接遮住，点遮盖可调整样式。' }),
             // T73：导出在隔离副本里重画，美化楼偶尔会和预览有出入；说明 + 可复制的诊断（不含正文）
             h('details', { class: 'stcr-studio-diff' },
@@ -211,7 +220,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const side = h('aside', { class: 'stcr-studio-side', 'aria-label': '卡片设置' }, sideMain, rulesHost);
         const studio = h('div', { class: 'stcr-studio', role: 'dialog', 'aria-modal': 'true', 'aria-label': '分享卡片', tabindex: '-1' },
             head, h('div', { class: 'stcr-studio-body' }, stage, side));
-        return { studio, head, exportBtn, sub, stage, slot, scaler, hover, status, side, sideMain, rulesHost, cover, tpl, sizes, masks, maskColor, icons, uniform, autoNames, myRules, mapList,
+        return { studio, head, exportBtn, editBtn, editInfo, editHint, resetEdit, sub, stage, slot, scaler, hover, status, side, sideMain, rulesHost, rulesBtn, cover, tpl, sizes, masks, maskColor, icons, uniform, autoNames, myRules, mapList,
             showNames, reasoning, signOn, signText, digest, digestSource, digestTitle, accent, wordCount, wordToggle, wordBox, wordChips, wordInput,
             tempSec, tempChips, note };
     }
@@ -226,11 +235,21 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             if (event.key !== 'Escape' || event.isComposing) return;
             event.preventDefault();
             if (mine.menu) closeMenu(mine);
+            else if (mine.editing) finishEdit(mine);
             else if (!els.rulesHost.hidden) { if (!mine.rulesPage?.isEditing()) els.rulesHost.querySelector('[data-rules-back]')?.click(); }
             else close();
         });
         // 工作台里的点击、按键不交给阅读器（翻页、快捷键）和 ST（委托事件、←/→ 切真实候选）。
         for (const type of CONTAINED) els.studio.addEventListener(type, event => event.stopPropagation());
+        els.stage.addEventListener('input', event => {
+            const part = event.target.closest(EDIT_PART);
+            if (!mine.editing || !mine.card?.contains(part)) return;
+            mine.editing.add(part);
+            fit(mine);
+        });
+        for (const type of ['dragstart', 'drop']) {
+            els.stage.addEventListener(type, event => { if (mine.editing) event.preventDefault(); });
+        }
 
         const prefChange = patch => changePrefs(mine, patch);
         els.tpl.addEventListener('click', event => { const id = event.target.closest('[data-tpl]')?.dataset.tpl; if (id) prefChange({ template: id }); });
@@ -250,12 +269,12 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         });
         // 名字开关变了：从原文重建副本（03 §5.9：预览、缓存键、选段、名字行、批注、映射列表一起变）
         els.autoNames.input.addEventListener('change', () => {
-            if (!alive() || mine.exporting) return;
+            if (!alive() || mine.exporting || mine.editing || mine.drafts.size) return;
             mine.autoNames = els.autoNames.input.checked;
             rebuild(mine);
         });
         els.myRules.input.addEventListener('change', () => {
-            if (!alive() || mine.exporting) return;
+            if (!alive() || mine.exporting || mine.editing || mine.drafts.size) return;
             mine.myRules = els.myRules.input.checked;
             rebuild(mine);
         });
@@ -303,6 +322,12 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const act = target.closest('[data-studio]')?.dataset.studio;
         if (act === 'close') { close(); return; }
         if (act === 'export') { doExport(mine); return; }
+        if (act === 'edit') { if (mine.editing) finishEdit(mine); else beginEdit(mine); return; }
+        if (act === 'reset-edit') { resetEdits(mine); return; }
+        if (mine.editing) {
+            if (target.closest('a')) event.preventDefault();
+            return;
+        }
         if (act === 'rules') { showRules(mine); return; }
         if (act === 'copy-diag') { copyDiagnostics(mine); return; }
         const mapEdit = target.closest('[data-map-edit]');
@@ -330,6 +355,74 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         compose(mine);
     }
 
+    // ───────────── 预览文字编辑 ─────────────
+
+    /** 只给卡片副本开放原地编辑，退出编辑后按当前模板和遮盖设置重新排版。 */
+    function beginEdit(mine) {
+        if (mine.els.editBtn.disabled || mine.exporting || !mine.card) return;
+        mine.editing = new Set();
+        closeMenu(mine);
+        getSelection()?.removeAllRanges();
+        mine.els.hover.hidden = true;
+        mine.card.classList.remove('stcr-card--pick');
+        for (const part of mine.card.querySelectorAll(EDIT_PART)) {
+            part.setAttribute('contenteditable', 'plaintext-only');
+            for (const node of part.querySelectorAll(EDIT_ATOMIC)) node.setAttribute('contenteditable', 'false');
+        }
+        syncEditControls(mine);
+    }
+
+    function finishEdit(mine) {
+        if (!mine.editing) return;
+        for (const part of mine.editing) {
+            const draft = part.cloneNode(true);
+            // 只在脱离页面的副本还原遮盖词，重建时按当前设置重新遮盖和测量。
+            for (const mask of draft.querySelectorAll('.stcr-mask[data-stcr-tw]')) {
+                mask.replaceWith(document.createTextNode(mine.words[Number(mask.dataset.stcrTw)] ?? ''));
+            }
+            for (const mark of draft.querySelectorAll('.stcr-card-highlight')) mark.replaceWith(...mark.childNodes);
+            for (const node of draft.querySelectorAll('[contenteditable]')) node.removeAttribute('contenteditable');
+            mine.drafts.set(part.dataset.stcrCardEdit, draft);
+        }
+        mine.editing = null;
+        getSelection()?.removeAllRanges();
+        compose(mine);
+    }
+
+    async function resetEdits(mine) {
+        if (mine.editing || mine.exporting || !mine.drafts.size) return;
+        if (!await confirm('恢复这张卡片的原文，并清除本次手动编辑？', '恢复原文') || st !== mine || mine.editing || mine.exporting) return;
+        mine.drafts.clear();
+        compose(mine);
+    }
+
+    function editPart(mine, key, el) {
+        el.dataset.stcrCardEdit = key;
+        const draft = mine.drafts.get(key)?.cloneNode(true);
+        if (draft) {
+            if (draft.dataset.stcrCss) el.dataset.stcrCss = draft.dataset.stcrCss;
+            el.replaceChildren(...draft.childNodes);
+        }
+        return el;
+    }
+
+    function syncEditControls(mine) {
+        const { els } = mine;
+        const editing = !!mine.editing, drafted = mine.drafts.size > 0;
+        els.editBtn.disabled = mine.exporting || mine.rebuilding || !els.rulesHost.hidden || !mine.card?.querySelector(EDIT_PART);
+        els.editBtn.textContent = editing ? '完成编辑' : '编辑内容';
+        els.side.inert = editing;
+        els.studio.classList.toggle('stcr-studio--editing', editing);
+        els.editInfo.hidden = !editing && !drafted;
+        els.resetEdit.hidden = editing;
+        els.resetEdit.disabled = mine.exporting;
+        els.editHint.textContent = editing ? '点卡片里的文字即可修改。完成后会重新套用屏蔽词。'
+            : '已保留本次编辑。若要改名字替换规则，请先恢复原文。';
+        els.autoNames.input.disabled = drafted;
+        els.myRules.input.disabled = drafted;
+        els.rulesBtn.disabled = drafted;
+    }
+
     /** 从电脑导入一张图片，存好后用在 use(asset) 上（小图案、封面、单个词）。 */
     async function importAndUse(mine, use) {
         const saved = await importAsset(mine.els.studio, toast);
@@ -344,6 +437,8 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     async function rebuild(mine) {
         const current = ++mine.token;
         const { source } = mine;
+        mine.rebuilding = true;
+        syncEditControls(mine);
         setStatus(mine, mine.card ? '' : '正在生成预览…');
         try {
             const built = await buildPieces(source.handle, source.floors, { autoReplaceNames: mine.autoNames, applyReplaceRules: mine.myRules, rules: mine.rules, assets: mine.assets }, mine.cache);
@@ -360,6 +455,11 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             console.error('[st-reader] 卡片预览生成失败：', error);
             setStatus(mine, `预览生成失败：${error.message ?? error}`, true);
             mine.els.exportBtn.disabled = true;
+        } finally {
+            if (st === mine && current === mine.token) {
+                mine.rebuilding = false;
+                syncEditControls(mine);
+            }
         }
     }
 
@@ -367,6 +467,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
 
     /** 按当前选项拼卡片、上遮盖、放进预览。同步完成，切模板/开关时立刻看到。 */
     function compose(mine) {
+        if (mine.editing) return;
         const { els, prefs } = mine;
         const tpl = template(mine);
         const size = CARD_SIZES[prefs.size];
@@ -383,14 +484,15 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const chat = h('div', { class: 'stcr-card-chat', id: tpl === 'theme' ? 'stcr_chat' : null });
         const names = tpl !== 'digest' && prefs.showNames;
         for (const piece of mine.pieces) {
+            const key = `${piece.index}:${piece.swipe}`;
             const reasoning = mine.includeReasoning && piece.reasoning;
             if (!piece.body && !reasoning) continue;
             chat.append(h('div', { class: `mes stcr-card-mes${piece.isSystem ? ' stcr-card-mes--system' : ''}`, is_user: String(piece.isUser), is_system: String(piece.isSystem) },
                 h('div', { class: 'mes_block' },
-                    names ? h('div', { class: 'ch_name' }, h('span', { class: 'name_text' }, piece.name.cloneNode(true))) : null,
+                    names ? h('div', { class: 'ch_name' }, editPart(mine, `${key}:name`, h('span', { class: 'name_text' }, piece.name.cloneNode(true)))) : null,
                     reasoning ? h('div', { class: 'stcr-card-reasoning' }, h('div', { class: 'stcr-card-reasoning-title', text: '思考过程' }),
-                        h('div', { class: 'mes_reasoning', 'data-stcr-card-part': `${piece.index}:${piece.swipe}:reasoning` }, piece.reasoning.cloneNode(true))) : null,
-                    piece.body ? h('div', { class: 'mes_text', 'data-stcr-card-part': `${piece.index}:${piece.swipe}:body` }, piece.body.cloneNode(true)) : null)));
+                        editPart(mine, `${key}:reasoning`, h('div', { class: 'mes_reasoning', 'data-stcr-card-part': `${key}:reasoning` }, piece.reasoning.cloneNode(true)))) : null,
+                    piece.body ? editPart(mine, `${key}:body`, h('div', { class: 'mes_text', 'data-stcr-card-part': `${key}:body` }, piece.body.cloneNode(true))) : null)));
         }
         // 楼里自带的 <style> 只管它那一楼：卡片和阅读器同在一页，别让卡片里的样式改到底下的正文（T50）
         for (const text of chat.querySelectorAll('.mes_text')) scopeFloorStyles(text);
@@ -398,7 +500,9 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         if (tpl === 'digest' && mine.thoughts.length) {
             page.append(h('div', { class: 'stcr-card-thoughts' },
                 h('div', { class: 'stcr-card-thoughts-label', text: '我的想法' }),
-                ...mine.thoughts.map(item => h('p', { class: 'stcr-card-thought', text: scrubNote(item.note, mine.source.handle, mine.mappings, { autoNames: mine.autoNames }) }))));
+                ...mine.thoughts.map((item, i) => editPart(mine, `thought:${i}`, h('p', {
+                    class: 'stcr-card-thought', text: scrubNote(item.note, mine.source.handle, mine.mappings, { autoNames: mine.autoNames }),
+                })))));
         }
         const foot = footer(mine, tpl);
         if (foot) page.append(foot);
@@ -419,6 +523,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         els.hover.hidden = true;
         closeMenu(mine);
         els.exportBtn.disabled = empty || mine.exporting;
+        syncEditControls(mine);
         if (empty) setStatus(mine, mine.pieces.some(p => p.reasoning) ? '选中的文字在思维链里：打开右边"包含思维链"就能看到。' : '这段选区里没有可以放进卡片的文字。');
         else if (!els.status.classList.contains('stcr-studio-status--error')) setStatus(mine, '');
         syncMappings(mine);
@@ -706,7 +811,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             h('span', { class: 'stcr-map-from', text: row.from, title: row.from }), h('i', { class: 'fa-solid fa-arrow-right', 'aria-hidden': 'true' }),
             row.to.kind === 'text' ? (row.to.value ? textTarget(row.to) : h('span', { class: 'stcr-map-to', text: '（删掉）' })) : h('span', { class: 'stcr-rule-pattern' }, patternGlyph(row.to, mine.assets)),
             h('small', { class: `stcr-row-tag${row.source === 'mine' ? ' stcr-row-tag--mine' : ''}`, text: row.source === 'mine' ? '我的规则' : '自动' }),
-            iconButton('fa-pen', row.source === 'mine' ? `改这条规则：${row.from}` : `给"${row.from}"定自己的替换`, { class: 'stcr-map-edit', 'data-map-edit': i })))
+            iconButton('fa-pen', row.source === 'mine' ? `改这条规则：${row.from}` : `给"${row.from}"定自己的替换`, { class: 'stcr-map-edit', 'data-map-edit': i, disabled: !!mine.drafts.size })))
             : [h('li', { class: 'stcr-studio-hint', text: '这张卡上没有需要替换的名字。' })]),
             skipped.length ? h('li', { class: 'stcr-studio-hint stcr-studio-skip', text: `为保护完整名字，这些规则在名字里没有生效：${skipped.join('、')}` }) : '');
     }
@@ -752,7 +857,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             current === 'block' ? colorPicker({ value: own?.color ?? null, noneLabel: '跟随默认颜色', noneSwatch: blockColor(mine, mine.colors ?? { accent: null }, null),
                 label: '这个词的色块颜色', onPick: color => { setWordStyle(mine, word, 'block', null, color); reopen(); } }) : null,
             h('div', { class: 'stcr-mask-menu-actions' },
-                h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-menu-act': 'rule', title: '以后所有卡片上，这个词都换成你定的文字或小图案' },
+                h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-menu-act': 'rule', disabled: !!mine.drafts.size, title: '以后所有卡片上，这个词都换成你定的文字或小图案' },
                     h('i', { class: 'fa-solid fa-right-left', 'aria-hidden': 'true' }), ' 总是替换为…'),
                 isTemp ? h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-menu-act': 'keep' },
                     h('i', { class: 'fa-solid fa-plus', 'aria-hidden': 'true' }), ' 加入永久屏蔽词') : null,
@@ -795,9 +900,9 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
 
     /** 规则编辑小框（预览里"总是替换为…"、映射列表的笔）。存好后：这个词不再临时遮住，预览从原文重建。 */
     async function openRuleMenu(mine, rule, anchor) {
-        if (mine.exporting) return;
+        if (mine.exporting || mine.editing || mine.drafts.size) return;
         mine.scopes ??= await ruleScopes(mine.source.handle.chatKey);
-        if (st !== mine) return;
+        if (st !== mine || mine.exporting || mine.editing || mine.drafts.size) return;
         closeMenu(mine);
         const editor = createRuleEditor({ rule, scopes: mine.scopes, assets: mine.assets, host: mine.els.studio, toast, compact: true, autoNames: autoNames(mine),
             onAssetsChange: assets => setAssets(mine, assets),
@@ -833,6 +938,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
 
     /** 右侧切到"管理替换规则"子页；返回时从原文重建预览。 */
     function showRules(mine) {
+        if (mine.editing || mine.drafts.size || mine.exporting) return;
         const { els } = mine;
         closeMenu(mine);
         mine.rulesPage ??= createRulesManager({ host: els.studio, chatKey: mine.source.handle.chatKey, toast, autoNames: () => autoNames(mine),
@@ -840,11 +946,13 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             onChange: () => refreshRules(mine),
             onBack: () => {
                 els.rulesHost.hidden = true; els.sideMain.hidden = false; els.side.scrollTop = 0;
+                syncEditControls(mine);
                 if (innerWidth < 600) els.side.scrollIntoView({ block: 'start' }); // 手机：设置在预览下面，回到它的开头
             } });
         els.rulesHost.replaceChildren(mine.rulesPage.el);
         els.sideMain.hidden = true;
         els.rulesHost.hidden = false;
+        syncEditControls(mine);
         els.side.scrollTop = 0;
         if (innerWidth < 600) els.side.scrollIntoView({ block: 'start' });
         mine.rulesPage.load().catch(error => toast(`规则读取失败：${error.message ?? error}`));
@@ -974,7 +1082,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
 
     function onHover(mine, event) {
         const { els } = mine;
-        if (!mine.card || mine.exporting || !event) return;
+        if (!mine.card || mine.exporting || mine.editing || !event) return;
         const mask = event.target.closest?.('.stcr-mask, .stcr-card-highlight');
         if (mask && mine.card.contains(mask)) { els.hover.hidden = true; return; }
         const found = !getSelection()?.toString() && mine.card.contains(event.target) ? wordUnder(mine, event.clientX, event.clientY) : null;
@@ -1031,7 +1139,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
 
     /** 选区长短不限；遮盖仍沿用原来的 40 字限制，划线与遮盖分别判断。 */
     function onDragSelect(mine) {
-        if (mine.exporting) return;
+        if (mine.exporting || mine.editing) return;
         const selection = getSelection();
         if (!selection || selection.isCollapsed || !selection.rangeCount || !mine.card) return;
         const range = selection.getRangeAt(0);
@@ -1075,8 +1183,10 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
 
     async function doExport(mine) {
         const { els } = mine;
-        if (mine.exporting || !mine.card || els.exportBtn.disabled) return;
+        if (mine.exporting || mine.rebuilding || !mine.card || els.exportBtn.disabled) return;
+        if (mine.editing) finishEdit(mine);
         mine.exporting = true;
+        syncEditControls(mine);
         els.studio.classList.add('stcr-studio--busy');
         els.exportBtn.disabled = true;
         els.exportBtn.querySelector('i').className = 'fa-solid fa-spinner fa-spin';
@@ -1112,6 +1222,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         } finally {
             if (st === mine) {
                 mine.exporting = false;
+                syncEditControls(mine);
                 els.studio.classList.remove('stcr-studio--busy');
                 els.exportBtn.disabled = !mine.card?.querySelector('.stcr-card-chat')?.childElementCount;
                 els.exportBtn.querySelector('i').className = 'fa-solid fa-download';

@@ -1,4 +1,5 @@
 // ST Reader — AGPL-3.0
+// readandrepo 修改：2026-11-09，阅读时收集多段不连续文字，统一制作分享卡片。
 // 阅读器主控（T21/T22/T23a）：全屏覆盖层 #stcr_root、正文 #stcr_chat（D12）。
 // 只读（D02）：只调 03 §5 的读取接口；候选/思维链/进度/划线/收藏都是阅读器自己的状态，绝不写回 ST。
 
@@ -10,7 +11,7 @@ import { flushMirror, getMirrorStatus, mirrorNow, onMirrorStatus, restoreFromSer
 import { getVersion } from '../core/updateService.js';
 import { createPanel } from './annotationsPanel.js';
 import { backupStatus, describeStoreError, exportBackup, pickAndImport } from './backup.js';
-import { annotationToFloor, createPieceCache, MAX_CARD_FLOORS, selectionToFloors, wholeFloor } from './cardPieces.js';
+import { annotationToFloor, countCardSelections, createPieceCache, MAX_CARD_FLOORS, mergeCardSelections, selectionToFloors, wholeFloor } from './cardPieces.js';
 import { createCardStudio } from './cardStudio.js';
 import { copyText, h, iconButton, isTypingTarget, toast } from './dom.js';
 import { isFavoriteChat, loadFavoriteChats, onFavoriteChatsChange, resetFavoriteChats, toggleFavoriteChat } from './chatFavorites.js';
@@ -99,6 +100,7 @@ export async function openReader({ tab, chatKey } = {}) {
         chromeTimer: null, wheelAt: 0, wheelSum: 0, statusTimer: null, redact: null,
         prebuilt: new Map(), renderVersion: 0, prebuildJob: 0, // T82：空闲时先建好的前后批
         banner: null, staleOff: null, reloading: false, restoring: false,
+        cardSelections: [], collectionBar: null, collectionCount: null,
     };
     S = session;
     session.marks = createMarks({
@@ -136,6 +138,8 @@ export async function openReader({ tab, chatKey } = {}) {
     session.selUi = createSelectionUi({
         root, marks: session.marks, toast: say,
         onCard: range => openCardFromSelection(range),
+        onAddSelection: range => collectCardSelection(range),
+        getSelectionCount: () => countCardSelections(session.cardSelections),
         getChatKey: () => (session.handle ? session.chatKey : null),
         getAutoNames: () => (session.handle ? [session.handle.header.userName, session.handle.header.characterName].filter(Boolean) : []),
         setPopover: (el, options) => setPopover(el, options),
@@ -181,6 +185,7 @@ export async function openReader({ tab, chatKey } = {}) {
     root.querySelector('.stcr-body').prepend(session.drawer.el);
     root.querySelector('.stcr-body').append(session.panel.el);
     session.main.append(session.follow);
+    mountCardCollection(session);
     root.append(session.settings.panel, session.settings.fab);
 
     try { session.userAvatar = (await import('/scripts/personas.js')).user_avatar ?? ''; } catch { /* 没有头像也能读 */ }
@@ -562,6 +567,8 @@ function onClick(event) {
             case 'bookmark-floor': if (mes) toggleBookmark(mes, false); return;
             case 'bookmark-swipe': if (mes) toggleBookmark(mes, true); return;
             case 'card': if (mes) openCardForFloor(mes); return;
+            case 'card-collection-open': openCollectedCard(); return;
+            case 'card-collection-clear': clearCardCollection(session); say('已清空选段'); return;
             default: break;
         }
     }
@@ -932,12 +939,76 @@ function openCardForFloor(mes) {
 function openCardFromSelection(range) {
     const session = S;
     if (!session?.handle) return;
-    const floors = selectionToFloors(range, renderedFloors());
-    if (!floors.length) { say('这段选区里没有正文文字'); return; }
-    if (floors.length > MAX_CARD_FLOORS) { say(`一张卡最多 ${MAX_CARD_FLOORS} 楼，请少选一些`); return; }
+    const picked = selectionToFloors(range, renderedFloors());
+    if (!picked.length) { say('这段选区里没有正文文字'); return; }
+    const floors = mergeCardSelections(session.cardSelections, picked);
+    if (!withinCardLimit(floors)) return;
+    // 已在收集时，把最后这一段也留在集合里；关闭工作台后仍能继续补选。
+    if (session.cardSelections.length) { session.cardSelections = floors; syncCardCollection(session); }
     getSelection()?.removeAllRanges();
-    openStudio({ handle: session.handle, ownsHandle: false, kind: 'selection', floors, annotations: session.marks.records(),
+    openStudio({ handle: session.handle, ownsHandle: false, kind: 'selection', floors, selectionCount: countCardSelections(floors), annotations: session.marks.records(),
         includeReasoning: floors.some(floor => floor.reasoning) });
+}
+
+/** 持续入口占用独立一行，正文视口让位；窄屏换行也不会遮住文字。 */
+function mountCardCollection(session) {
+    session.collectionCount = h('span', { class: 'stcr-collection-count', role: 'status', 'aria-live': 'polite' });
+    session.collectionBar = h('div', { class: 'stcr-collectionbar', hidden: true, role: 'toolbar', 'aria-label': '已收集的卡片选段' },
+        session.collectionCount,
+        h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-open', text: '制作卡片' }),
+        h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-clear', text: '清空' }));
+    session.main.append(session.collectionBar);
+    const fit = () => {
+        if (S !== session) return;
+        const height = session.collectionBar.hidden ? 0 : Math.ceil(session.collectionBar.getBoundingClientRect().height);
+        session.main.style.setProperty('--stcr-collection-height', `${height}px`);
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(session.collectionBar);
+    session.cleanup.push(() => observer.disconnect());
+    session.fitCardCollection = fit;
+}
+
+function syncCardCollection(session) {
+    const count = countCardSelections(session.cardSelections);
+    session.collectionCount.textContent = `已选 ${count} 段`;
+    session.collectionCount.title = '可继续选中文字并加入选段；同楼不同候选分别保留。切换聊天或重新读取会清空。';
+    session.collectionBar.hidden = count === 0;
+    session.fitCardCollection();
+}
+
+function clearCardCollection(session) {
+    session.cardSelections = [];
+    if (session.collectionBar) syncCardCollection(session);
+}
+
+function withinCardLimit(floors) {
+    if (floors.length <= MAX_CARD_FLOORS) return true;
+    say(`一张卡最多 ${MAX_CARD_FLOORS} 个楼层或候选，请少选一些，或先制作已选内容`);
+    return false;
+}
+
+/** 选区立即转为楼/候选/文字偏移，之后翻页释放 DOM 也不会丢掉已选片段。 */
+function collectCardSelection(range) {
+    const session = S;
+    if (!session?.handle) return;
+    const picked = selectionToFloors(range, renderedFloors());
+    if (!picked.length) { say('这段选区里没有正文文字'); return; }
+    const floors = mergeCardSelections(session.cardSelections, picked);
+    if (!withinCardLimit(floors)) return;
+    session.cardSelections = floors;
+    getSelection()?.removeAllRanges();
+    syncCardCollection(session);
+    say(`已收集 ${countCardSelections(floors)} 段，可以继续选别处`);
+}
+
+function openCollectedCard() {
+    const session = S;
+    if (!session?.handle || !session.cardSelections.length) return;
+    const floors = mergeCardSelections(session.cardSelections);
+    getSelection()?.removeAllRanges();
+    openStudio({ handle: session.handle, ownsHandle: false, kind: 'selection', floors, selectionCount: countCardSelections(floors),
+        annotations: session.marks.records(), includeReasoning: floors.some(floor => floor.reasoning) });
 }
 
 /** 批注面板划线条目上的 🖼：别的聊天的划线就自己只读打开那个聊天，工作台关掉时释放。 */
@@ -1088,6 +1159,7 @@ async function loadChat(chatKey, { index = null, swipe = null, handle: ready = n
 
 /** 离开聊天：先清 DOM 与模型引用，再 close 旧 handle（03 §5.3）。 */
 function releaseChat(session) {
+    clearCardCollection(session);
     if (session.handle && session.studio.usesHandle(session.handle)) session.studio.close();
     session.marks.reset();
     session.chat.replaceChildren();

@@ -7,7 +7,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "st-reader team",
-    "version": "0.3.1-self.2",
+    "version": "0.3.1-self.3",
     "homePage": "https://github.com/zqiu8414-collab/readandrepo",
     "auto_update": true,
     "minimum_client_version": "1.13.0",

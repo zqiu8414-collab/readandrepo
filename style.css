@@ -925,7 +925,7 @@
  *    横向位置由 reader.placeFollower 算：列外空白够就停在列旁不压字，不够（--edge）贴正文区边缘。 ── */
 #stcr_root .stcr-follow {
     position: absolute;
-    top: 14px;
+    top: calc(14px + var(--stcr-collection-height, 0px));
     z-index: 4;
     display: flex;
     flex-direction: column;
@@ -1021,6 +1021,7 @@
 }
 #stcr_root .stcr-studio-title { margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; }
 #stcr_root .stcr-studio-sub { flex: 1; min-width: 0; color: var(--stcr-faint); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#stcr_root .stcr-studio-edit { flex: none; white-space: nowrap; }
 #stcr_root .stcr-studio-export {
     display: inline-flex;
     align-items: center;
@@ -1060,6 +1061,15 @@
 }
 #stcr_root .stcr-studio-status { max-width: 540px; color: var(--stcr-faint); font-size: 13px; text-align: center; line-height: 1.7; }
 #stcr_root .stcr-studio-status--error { color: #e06c5a; }
+#stcr_root .stcr-studio-edit-info:not([hidden]) {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px;
+    flex: none; color: var(--stcr-text); font-size: 12px; text-align: center;
+}
+#stcr_root .stcr-studio--editing .stcr-studio-side { opacity: .6; }
+#stcr_root .stcr-studio--editing [contenteditable="plaintext-only"] {
+    cursor: text; min-height: 1em; outline: 1px dashed var(--stcr-accent); outline-offset: 2px;
+    user-select: text !important;
+}
 #stcr_root .stcr-studio-tip { max-width: 540px; margin: 0; color: var(--stcr-faint); font-size: 12px; text-align: center; line-height: 1.7; }
 #stcr_root .stcr-studio-diff { max-width: 540px; color: var(--stcr-faint); font-size: 12px; line-height: 1.7; }
 #stcr_root .stcr-studio-diff > summary { cursor: pointer; text-align: center; list-style: none; text-decoration: underline dotted; text-underline-offset: 3px; }
@@ -1641,9 +1651,23 @@
 #stcr_root button.stcr-banner-text:hover { text-decoration: underline; text-underline-offset: 3px; }
 #stcr_root button.stcr-banner-text:disabled { cursor: progress; opacity: .7; text-decoration: none; }
 #stcr_root .stcr-banner-close { flex: none; min-width: 28px; height: 28px; font-size: 12px; }
-#stcr_root.stcr-has-banner .stcr-follow { top: 52px; }
+#stcr_root.stcr-has-banner .stcr-follow { top: calc(52px + var(--stcr-collection-height, 0px)); }
 #stcr_root .stcr-set-backup > .stcr-set-label { align-self: flex-start; line-height: 1.6; }
 @media (max-width: 599px) { #stcr_root .stcr-backup-sep { display: none; } }
 /* T80：Aa → 显示 里的"楼层胶囊 左 / 右" */
 #stcr_root .stcr-follow-side { display: inline-flex; align-items: center; gap: 8px; margin-left: 14px; }
 #stcr_root .stcr-follow-side .stcr-seg-btn { min-width: 2.6em; padding: 3px 10px; }
+
+/* readandrepo 2026-11-09：多段收集条占用独立空间；选区菜单窄屏可换行。 */
+#stcr_root .stcr-collectionbar {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 3;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid var(--stcr-border);
+    background: var(--stcr-panel); font-size: 13px;
+}
+#stcr_root .stcr-collection-count { flex: 1; min-width: 5em; }
+#stcr_root .stcr-main > .stcr-scroll { top: var(--stcr-collection-height, 0px); }
+#stcr_root .stcr-main > .stcr-banner { margin-top: var(--stcr-collection-height, 0px); }
+#stcr_root .stcr-sel-pop--collect { flex-wrap: wrap; max-width: calc(100% - 16px); border-radius: 16px; }
+#stcr_root .stcr-card-excerpt { display: block; }
+#stcr_root .stcr-card-excerpt + .stcr-card-excerpt { margin-top: .75em; }

@@ -1,4 +1,5 @@
 // ST Reader — AGPL-3.0
+// readandrepo 修改：2026-11-09，收集不连续选段；按楼/候选/区域归并，间隔原文不进入卡片。
 // 分享卡片的"选段"（T23a、F2、03 §5.9 选段合同）。
 // 阅读器里的选区 / 整楼 / 一条划线 → 每楼要摘的范围（用划线同一套"锚点文字"位置）→
 // 在 createCardMessage 的已脱敏副本上按位置裁剪，得到不再绑定原文的片段，交给模板。
@@ -14,6 +15,40 @@ import { alignTexts, isSystemLike, mapOffset } from './logic.js';
 /** 思维链在前、正文在后，与楼层里的顺序一致。 */
 const PARTS = Object.freeze([['reasoning', '.mes_reasoning'], ['body', '.mes_text']]);
 export const MAX_CARD_FLOORS = 40;
+
+const rangesOf = pick => !pick || pick === 'all' ? [] : Array.isArray(pick) ? pick : [pick];
+
+/** 只合并重叠或相邻区间；不以首尾包住中间没有选中的文字。 */
+function mergeRanges(...picks) {
+    if (picks.includes('all')) return 'all';
+    const sorted = picks.flatMap(rangesOf)
+        .filter(at => Number.isInteger(at?.start) && Number.isInteger(at?.end) && at.start >= 0 && at.end > at.start)
+        .map(at => ({ start: at.start, end: at.end })).sort((a, b) => a.start - b.start || a.end - b.end);
+    const merged = [];
+    for (const at of sorted) {
+        const last = merged.at(-1);
+        if (last && at.start <= last.end) last.end = Math.max(last.end, at.end);
+        else merged.push(at);
+    }
+    return merged.length > 1 ? merged : merged[0] ?? null;
+}
+
+/** 同一候选内归并；同楼不同候选各自保留，不改阅读器或 ST 当前候选。 */
+export function mergeCardSelections(...groups) {
+    const merged = new Map();
+    for (const floor of groups.flat()) {
+        if (!Number.isInteger(floor?.index) || floor.index < 0 || !Number.isInteger(floor.swipe) || floor.swipe < 0) continue;
+        const key = `${floor.index}:${floor.swipe}`;
+        const entry = merged.get(key) ?? { index: floor.index, swipe: floor.swipe, body: null, reasoning: null };
+        for (const [part] of PARTS) entry[part] = mergeRanges(entry[part], floor[part]);
+        if (entry.body || entry.reasoning) merged.set(key, entry);
+    }
+    return [...merged.values()].sort((a, b) => a.index - b.index || a.swipe - b.swipe);
+}
+
+/** 归并后不连续段数；跨正文/思维链分别计数。 */
+export const countCardSelections = floors => floors.reduce((count, floor) => count + PARTS.reduce((sum, [part]) =>
+    sum + (floor[part] === 'all' ? 1 : rangesOf(floor[part]).length), 0), 0);
 
 const isShown = el => el.getClientRects().length > 0;
 
@@ -122,13 +157,13 @@ const hasContent = fragment => !!fragment && (fragment.textContent.trim() !== ''
  * 选段 → 卡片片段。每个片段：{index, swipe, isUser, isSystem, name, body, reasoning}（后三者是 DocumentFragment 或 null）。
  * mappings 是这些楼实际命中的名字替换（只给工作台私有列表用，不进卡片）。
  * @param {object} handle 阅读器的聊天句柄，导出完成前不能关闭
- * @param {{index:number,swipe:number,body:object|'all'|null,reasoning:object|'all'|null}[]} floors
+ * @param {{index:number,swipe:number,body:object|object[]|'all'|null,reasoning:object|object[]|'all'|null}[]} floors
  * @param {{autoReplaceNames:boolean, applyReplaceRules:boolean, rules?:object[], assets?:object[]}} options 两个名字开关各自独立（I021、03 §5.9）
  */
 export async function buildPieces(handle, floors, options, cache) {
     const pieces = [], mappings = [];
     const auto = options.autoReplaceNames !== false, mine = options.applyReplaceRules !== false;
-    for (const floor of floors) {
+    for (const floor of mergeCardSelections(floors)) {
         const key = `${floor.index}:${floor.swipe}:${auto ? 1 : 0}${mine ? 1 : 0}`;
         if (!cache.cards.has(key)) {
             cache.cards.set(key, await createCardMessage(handle, floor.index, {
@@ -148,7 +183,21 @@ export async function buildPieces(handle, floors, options, cache) {
             if (pick === 'all') fragment = cloneChildren(source);
             else {
                 const segments = alignTexts(readerText(cache, handle, floor.index, floor.swipe, part), cardTextNodes(source).map(node => node.data).join(''));
-                fragment = cloneByOffsets(source, mapOffset(segments, pick.start, 'start'), mapOffset(segments, pick.end, 'end'));
+                // 名字替换会把半个名字扩展成完整替换词；在映射后的坐标再归并，避免同一替换词重复。
+                const mapped = mergeRanges(rangesOf(pick).map(at => ({ start: mapOffset(segments, at.start, 'start'), end: mapOffset(segments, at.end, 'end') })));
+                const ranges = rangesOf(mapped);
+                if (ranges.length === 1) fragment = cloneByOffsets(source, ranges[0].start, ranges[0].end);
+                else {
+                    fragment = source.ownerDocument.createDocumentFragment();
+                    for (const at of ranges) {
+                        const excerpt = cloneByOffsets(source, at.start, at.end);
+                        if (!hasContent(excerpt)) continue;
+                        const block = source.ownerDocument.createElement('div');
+                        block.className = 'stcr-card-excerpt';
+                        block.append(excerpt);
+                        fragment.append(block);
+                    }
+                }
             }
             if (hasContent(fragment)) piece[part] = fragment;
         }
@@ -164,7 +213,7 @@ export async function buildPieces(handle, floors, options, cache) {
  */
 export async function findThoughts(handle, floors, annotations, cache) {
     const found = [];
-    for (const [order, floor] of floors.entries()) {
+    for (const [order, floor] of mergeCardSelections(floors).entries()) {
         const model = handle.getMessage(floor.index);
         const swipe = model.swipes[floor.swipe];
         for (const [partOrder, [part]] of PARTS.entries()) {
@@ -178,7 +227,7 @@ export async function findThoughts(handle, floors, annotations, cache) {
             for (const record of mine) {
                 const at = await locateAnchorText(text, record.anchor, context);
                 if (at.status !== 'attached') continue;
-                if (pick !== 'all' && !(at.start < pick.end && at.end > pick.start)) continue;
+                if (pick !== 'all' && !rangesOf(pick).some(picked => at.start < picked.end && at.end > picked.start)) continue;
                 found.push({ key: [order, partOrder, at.start], note: record.note.trim(), id: record.id });
             }
         }
