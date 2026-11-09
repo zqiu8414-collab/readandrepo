@@ -117,7 +117,8 @@ eventSource.on(event_types.APP_READY, async () => {
     } catch (error) { console.error('[st-reader] 聊天事件订阅失败：', error); }
     // 界面入口：魔杖菜单、/reader。格式化失败也挂入口，打开时会再试一次并提示。
     try {
-        const { mountEntries } = await import('./src/ui/mount.js');
+        // 入口和卡片界面依赖使用同一资源版本，避免更新后浏览器继续运行旧界面。
+        const { mountEntries } = await import('./src/ui/mount.js?v=0.3.1-self.4');
         mountEntries();
         console.log('[st-reader] 阅读器入口已挂载：魔杖菜单「阅读器」、/reader。');
     } catch (error) { console.error('[st-reader] 阅读器入口挂载失败：', error); }

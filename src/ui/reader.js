@@ -11,8 +11,8 @@ import { flushMirror, getMirrorStatus, mirrorNow, onMirrorStatus, restoreFromSer
 import { getVersion } from '../core/updateService.js';
 import { createPanel } from './annotationsPanel.js';
 import { backupStatus, describeStoreError, exportBackup, pickAndImport } from './backup.js';
-import { annotationToFloor, countCardSelections, createPieceCache, MAX_CARD_FLOORS, mergeCardSelections, selectionToFloors, wholeFloor } from './cardPieces.js';
-import { createCardStudio } from './cardStudio.js';
+import { annotationToFloor, countCardSelections, createPieceCache, MAX_CARD_FLOORS, mergeCardSelections, selectionToFloors, wholeFloor } from './cardPieces.js?v=0.3.1-self.4';
+import { createCardStudio } from './cardStudio.js?v=0.3.1-self.4';
 import { copyText, h, iconButton, isTypingTarget, toast } from './dom.js';
 import { isFavoriteChat, loadFavoriteChats, onFavoriteChatsChange, resetFavoriteChats, toggleFavoriteChat } from './chatFavorites.js';
 import { createDrawer } from './drawer.js';
@@ -22,7 +22,7 @@ import { buildFloor, buildSwipeControl, fillFloor, floorFault, floorPlainText, s
 import { effectivePrefs, faultReport, foldRuns, followPlacement, formatStamp, isFolded, mirrorStatusText, parseJumpInput, pickSwipe, progressText, restoreSummary, swipePreviews } from './logic.js';
 import { createMarks, highlightSupported } from './marks.js';
 import { flushProgress, getPrefs, getProgress, lastRead, loadPrefs, onPrefsChange, reloadPrefs, rememberSwipe, setPrefs, setReadPosition } from './prefs.js';
-import { createSelectionUi } from './selectionPopover.js';
+import { createSelectionUi } from './selectionPopover.js?v=0.3.1-self.4';
 import { hasRedaction, redactString, setRedactState, visibleText } from './redact.js';
 import { createSettingsBar } from './settingsBar.js';
 import { createRulesManager } from './rulesUi.js';

@@ -11,7 +11,7 @@
 import { exportCard, ruleWords, wrapMaskSpans } from '../core/cardExport.js';
 import { store } from '../core/store.js';
 import { getVersion } from '../core/updateService.js';
-import { buildPieces, createPieceCache, findThoughts, scrubNote } from './cardPieces.js';
+import { buildPieces, createPieceCache, findThoughts, scrubNote } from './cardPieces.js?v=0.3.1-self.4';
 import { createCardMarks } from './cardMarks.js';
 import { COLORS } from './marks.js';
 import { colorPicker, readableOn } from './colorPicker.js';
