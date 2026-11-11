@@ -1,11 +1,19 @@
 // ST Reader — AGPL-3.0
 // Ny 1.1.9 兼容层：只读现有 IndexedDB，不导入插件源码，不创建字体数据库。
+import { waitForExport } from './exportControl.js?v=0.3.1-self.5';
 export const splitFontFamilies = value => (String(value).match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,]+/g) ?? [])
     .map(value => value.trim().replace(/^["']|["']$/g, '').toLowerCase());
 
-export function toDataUrl(blob) {
+export function toDataUrl(blob, { signal } = {}) {
+    signal?.throwIfAborted();
     return new Promise((resolve, reject) => {
-        const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob);
+        const reader = new FileReader();
+        const cleanup = () => signal?.removeEventListener('abort', abort);
+        const abort = () => { cleanup(); reader.abort(); reject(signal.reason ?? new DOMException('导出已取消', 'AbortError')); };
+        reader.onload = () => { cleanup(); resolve(reader.result); };
+        reader.onerror = () => { cleanup(); reject(reader.error); };
+        signal?.addEventListener('abort', abort, { once: true });
+        reader.readAsDataURL(blob);
     });
 }
 
@@ -31,7 +39,8 @@ export async function readNyFontBlobs(entries) {
 }
 
 /** 返回完全内嵌的字体 CSS；不把任何网络 URL 交给截图库。 */
-export async function buildCardFontCss(root) {
+export async function buildCardFontCss(root, { signal } = {}) {
+    signal?.throwIfAborted();
     const doc = root.ownerDocument, view = doc.defaultView, families = new Set();
     for (const node of [root, ...root.querySelectorAll('*')]) {
         for (const pseudo of [null, '::before', '::after']) {
@@ -42,24 +51,27 @@ export async function buildCardFontCss(root) {
     }
     const metadata = globalThis.SillyTavern?.getContext().extensionSettings['Ny-font-manager']?.importedFonts ?? [];
     const entries = metadata.filter(item => item.kind === 'file' && families.has(item.family.toLowerCase()));
-    const records = await readNyFontBlobs(entries), embedded = new Set(), css = [];
+    const records = await waitForExport(readNyFontBlobs(entries), { signal, message: '本地字体读取超时' }), embedded = new Set(), css = [];
     let size = 0;
     for (const entry of records) {
+        signal?.throwIfAborted();
         if (!(entry.blob instanceof Blob) || !entry.blob.size) throw new Error(`Ny 字体 ${entry.family} 的文件缺失，请重新导入`);
         size += entry.blob.size;
         if (size > 32 * 1024 * 1024) throw new RangeError('本卡字体总量超过 32 MiB，请减少使用的字体');
-        const dataUrl = await toDataUrl(new Blob([entry.blob], { type: 'application/octet-stream' }));
+        const dataUrl = await toDataUrl(new Blob([entry.blob], { type: 'application/octet-stream' }), { signal });
         // Ny 加载本地文件时使用默认 descriptors；此处同样声明 normal/400，粗斜体由浏览器合成。
         css.push(`@font-face{font-family:${JSON.stringify(entry.family)};src:url("${dataUrl}");font-style:normal;font-weight:400;font-display:block;}`);
         embedded.add(entry.family.toLowerCase());
     }
+    const embeddedRules = new Set();
     const scan = rules => {
         for (const rule of rules) {
             if (rule.type === 5) {
                 const family = splitFontFamilies(rule.style.fontFamily)[0];
                 const src = rule.style.getPropertyValue('src');
-                if (families.has(family) && !embedded.has(family) && /^url\(["']?data:[^)]*\)(?:\s*format\([^)]*\))?$/.test(src)) {
-                    css.push(rule.cssText); embedded.add(family);
+                // 同一 family 可以有不同字重、斜体或 unicode-range 分包；只去重完全相同的声明。
+                if (families.has(family) && !embeddedRules.has(rule.cssText) && /^url\(["']?data:[^)]*\)(?:\s*format\([^)]*\))?$/.test(src)) {
+                    css.push(rule.cssText); embeddedRules.add(rule.cssText); embedded.add(family);
                 }
             } else if (rule.cssRules) scan(rule.cssRules);
         }

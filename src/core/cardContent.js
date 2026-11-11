@@ -1,9 +1,9 @@
 // ST Reader — AGPL-3.0
-import { initFormatter, formatWithStrategy } from './formatter.js';
-import { loadHostRuntime } from './hostRuntime.js';
-import { collectScripts, runDisplayRegex, PLACEMENT } from './regexPipeline.js';
-import { replaceNamesInRaw, maskText, CARD_ICONS } from './cardTransforms.js';
-import { normalizeAssetImage, sanitizeSvg } from './assetCodec.js';
+import { initFormatter, formatWithStrategy } from './formatter.js?v=0.3.1-self.5';
+import { loadHostRuntime } from './hostRuntime.js?v=0.3.1-self.5';
+import { collectScripts, runDisplayRegex, PLACEMENT } from './regexPipeline.js?v=0.3.1-self.5';
+import { replaceNamesInRaw, maskText, normalizeMaskStyle, CARD_ICONS } from './cardTransforms.js?v=0.3.1-self.5';
+import { normalizeAssetImage, sanitizeSvg } from './assetCodec.js?v=0.3.1-self.5';
 
 const sources = new WeakMap();
 const skipped = 'style,script,template,button,textarea,[data-stcr-protected],[data-stcr-mask]';
@@ -198,9 +198,9 @@ function maskElement(doc, segment, assets, pixelWidth) {
 }
 
 /** 文本节点适配器：复制输入树；跨 em/strong 等内联节点命中，绝不改属性或 style 文本。 */
-export function wrapMaskSpans(root, words = [], style = 'bar', assets = new Map()) {
+export function wrapMaskSpans(root, words = [], style = 'bar', assets = new Map(), wordStyles = null) {
     const copy = root.cloneNode(true);
-    maskTextNodesInPlace(copy, words, style, assets, root);
+    maskTextNodesInPlace(copy, words, style, assets, root, wordStyles);
     return copy;
 }
 
@@ -228,13 +228,21 @@ function textRange(doc, offsets, segment) {
 }
 
 /** 先测量全部命中，再逆序变更副本，避免先插入的遮盖影响后面的排版读数。 */
-export function maskTextNodesInPlace(root, words, style, assets, measureRoot = root) {
+export function maskTextNodesInPlace(root, words, style, assets, measureRoot = root, wordStyles = null) {
     const doc = root.ownerDocument, measuredRuns = textRuns(measureRoot), changes = [];
+    const indexes = new Map(words.map((word, index) => [word, index]));
     textRuns(root).forEach((nodes, runIndex) => {
         const offsets = []; let text = '';
         for (const node of nodes) { offsets.push({ node, start: text.length, end: text.length + node.length }); text += node.data; }
         const matches = maskText(text, words, style).filter(segment => segment.kind === 'mask');
         for (const segment of matches) {
+            // 所有词一次匹配和测量；编号只用于工作台，不把原词写进 DOM。
+            const word = text.slice(segment.start, segment.end);
+            const wordIndex = indexes.get(word);
+            if (wordStyles?.has(word)) {
+                segment.style = normalizeMaskStyle(wordStyles.get(word));
+                segment.width = segment.style.uniform ? 3 : Math.max(1, [...word].length);
+            }
             let pixelWidth;
             if (!segment.style.uniform && measureRoot.isConnected) {
                 const measuredOffsets = offsets.map((item, index) => ({ ...item, node: measuredRuns[runIndex][index] }));
@@ -242,14 +250,16 @@ export function maskTextNodesInPlace(root, words, style, assets, measureRoot = r
                 const width = measurement.getBoundingClientRect().width;
                 if (Number.isFinite(width) && width > 0) pixelWidth = width;
             }
-            changes.push({ offsets, segment, pixelWidth });
+            changes.push({ offsets, segment, pixelWidth, wordIndex });
         }
     });
-    for (const { offsets, segment, pixelWidth } of changes.reverse()) {
+    for (const { offsets, segment, pixelWidth, wordIndex } of changes.reverse()) {
         const range = textRange(doc, offsets, segment);
         // T83：内联 SVG 的 <text> 里放不了 HTML 遮盖块（画不出来），换成等长的实心方块字，原词照样删掉
         const inSvg = range.startContainer.parentElement?.closest('svg'), length = [...range.toString()].length;
-        range.deleteContents(); range.insertNode(inSvg ? doc.createTextNode('█'.repeat(length)) : maskElement(doc, segment, assets, pixelWidth));
+        const replacement = inSvg ? doc.createTextNode('█'.repeat(length)) : maskElement(doc, segment, assets, pixelWidth);
+        if (!inSvg && wordStyles) replacement.dataset.stcrTw = String(wordIndex);
+        range.deleteContents(); range.insertNode(replacement);
     }
 }
 

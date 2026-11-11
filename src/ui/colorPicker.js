@@ -2,8 +2,8 @@
 // 颜色选择条（T42、F14①②）：8 个预设 + 自己输入色号。替换文字的背景色和色块遮盖共用。
 // 只产出小写 #rrggbb（core 只收六位实色，03 §5.12）；"无 / 跟随模板"由调用方用 null 表示。
 
-import { h } from './dom.js';
-import { cleanHexColor, COLOR_PRESETS } from './logic.js';
+import { h } from './dom.js?v=0.3.1-self.5';
+import { cleanHexColor, COLOR_PRESETS } from './logic.js?v=0.3.1-self.5';
 
 /** 底色上该用深字还是浅字（WCAG 相对亮度），替换文字加了底色时保证看得清。 */
 export function readableOn(hex) {

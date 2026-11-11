@@ -7,15 +7,15 @@
 // T59：跑完主题再接 testHostStylesBrowser（D29 ③）——阅读器打开期间暂停 #chat .mes 里的 <style>，
 // 正常关闭、打开/关闭中途抛错、pagehide、根节点被移走后，宿主这些 <style> 的 disabled 必须全部回到 false。
 
-import { isDevInstance } from '../core/readonlyGuard.js';
-import { formatWithStrategy, initFormatter } from '../core/formatter.js';
-import { createHtmlManager, findHtmlBlocks } from './htmlBlocks.js';
-import { buildFloor, fillFloor, floorFault } from './floorToolbar.js';
-import { h } from './dom.js';
-import { RENDER_FAULT_MARK } from './logic.js';
+import { isDevInstance } from '../core/readonlyGuard.js?v=0.3.1-self.5';
+import { formatWithStrategy, initFormatter } from '../core/formatter.js?v=0.3.1-self.5';
+import { createHtmlManager, findHtmlBlocks } from './htmlBlocks.js?v=0.3.1-self.5';
+import { buildFloor, fillFloor, floorFault } from './floorToolbar.js?v=0.3.1-self.5';
+import { h } from './dom.js?v=0.3.1-self.5';
+import { RENDER_FAULT_MARK } from './logic.js?v=0.3.1-self.5';
 import { COMMUNITY_HTML } from '../../dev/fixtures/html.mjs';
-import { closeReader, injectReaderFault, isReaderOpen, openReader } from './reader.js';
-import { getPrefs, setPrefs, setReadPosition } from './prefs.js';
+import { closeReader, injectReaderFault, isReaderOpen, openReader } from './reader.js?v=0.3.1-self.5';
+import { getPrefs, setPrefs, setReadPosition } from './prefs.js?v=0.3.1-self.5';
 
 export const BUILTIN_THEMES = Object.freeze(['Azure', 'Cappuccino', 'Celestial Macaron', 'Dark Lite', 'Dark V 1.0']);
 const DISPLAYS = Object.freeze([['0', '默认'], ['1', '气泡'], ['2', '文档']]);

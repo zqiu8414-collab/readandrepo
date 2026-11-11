@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
-import { htmlResourceUrl } from './htmlExternalResources.js';
-import { buildSrcdoc } from './htmlRenderer.js';
+import { htmlResourceUrl } from './htmlExternalResources.js?v=0.3.1-self.5';
+import { buildSrcdoc } from './htmlRenderer.js?v=0.3.1-self.5';
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 export function testHtmlSnapshotLogic() {
     const results = [], test = (name, run) => { run(); results.push({ name: `I032 ${name}`, passed: true }); };

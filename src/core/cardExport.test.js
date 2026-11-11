@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
-import { automaticNameRules, replaceNamesInRaw, maskText, normalizeMaskStyle } from './cardTransforms.js';
-import { rasterizeCardIcon } from './cardFonts.js';
+import { automaticNameRules, replaceNamesInRaw, maskText, normalizeMaskStyle } from './cardTransforms.js?v=0.3.1-self.5';
+import { rasterizeCardIcon } from './cardFonts.js?v=0.3.1-self.5';
 const assert = (value, message = '脱敏断言失败') => { if (!value) throw new Error(message); };
 const text = result => result.segments.map(item => item.kind === 'text' ? item.text : item.to.kind === 'text' ? item.to.value : `[${item.to.kind}]`).join('');
 const rule = (from, value, extra = {}) => ({ from, to: { kind: 'text', value }, scope: 'all', ...extra });

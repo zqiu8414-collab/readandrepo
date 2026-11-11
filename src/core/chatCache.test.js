@@ -1,5 +1,5 @@
 // ST Reader — AGPL-3.0
-import { createChatSource, INVALIDATING_EVENTS, matchesHostChat } from './chatSource.js';
+import { createChatSource, INVALIDATING_EVENTS, matchesHostChat } from './chatSource.js?v=0.3.1-self.5';
 const assert = (value, message = '断言失败') => { if (!value) throw new Error(message); };
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };

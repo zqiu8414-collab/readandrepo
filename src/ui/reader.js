@@ -3,31 +3,31 @@
 // 阅读器主控（T21/T22/T23a）：全屏覆盖层 #stcr_root、正文 #stcr_chat（D12）。
 // 只读（D02）：只调 03 §5 的读取接口；候选/思维链/进度/划线/收藏都是阅读器自己的状态，绝不写回 ST。
 
-import { getCurrentChatKey, openChat, parseChatKey } from '../core/chatSource.js';
-import { maskHtmlString } from '../core/cardExport.js';
-import { initFormatter } from '../core/formatter.js';
-import { store } from '../core/store.js';
-import { flushMirror, getMirrorStatus, mirrorNow, onMirrorStatus, restoreFromServer, whenStarted } from '../core/backupService.js';
-import { getVersion } from '../core/updateService.js';
-import { createPanel } from './annotationsPanel.js';
-import { backupStatus, describeStoreError, exportBackup, pickAndImport } from './backup.js';
-import { annotationToFloor, countCardSelections, createPieceCache, MAX_CARD_FLOORS, mergeCardSelections, selectionToFloors, wholeFloor } from './cardPieces.js?v=0.3.1-self.4';
-import { createCardStudio } from './cardStudio.js?v=0.3.1-self.4';
-import { copyText, h, iconButton, isTypingTarget, toast } from './dom.js';
-import { isFavoriteChat, loadFavoriteChats, onFavoriteChatsChange, resetFavoriteChats, toggleFavoriteChat } from './chatFavorites.js';
-import { createDrawer } from './drawer.js';
-import { createHtmlManager } from './htmlBlocks.js';
-import { createHtmlShot } from './htmlShot.js';
-import { buildFloor, buildSwipeControl, fillFloor, floorFault, floorPlainText, syncBookmarkMarks } from './floorToolbar.js';
-import { effectivePrefs, faultReport, foldRuns, followPlacement, formatStamp, isFolded, mirrorStatusText, parseJumpInput, pickSwipe, progressText, restoreSummary, swipePreviews } from './logic.js';
-import { createMarks, highlightSupported } from './marks.js';
-import { flushProgress, getPrefs, getProgress, lastRead, loadPrefs, onPrefsChange, reloadPrefs, rememberSwipe, setPrefs, setReadPosition } from './prefs.js';
-import { createSelectionUi } from './selectionPopover.js?v=0.3.1-self.4';
-import { hasRedaction, redactString, setRedactState, visibleText } from './redact.js';
-import { createSettingsBar } from './settingsBar.js';
-import { createRulesManager } from './rulesUi.js';
-import { createDocPanel } from './docPanel.js';
-import { createVersionRow, maybeShowWhatsNew } from './updateUi.js';
+import { getCurrentChatKey, openChat, parseChatKey } from '../core/chatSource.js?v=0.3.1-self.5';
+import { maskHtmlString } from '../core/cardExport.js?v=0.3.1-self.5';
+import { initFormatter } from '../core/formatter.js?v=0.3.1-self.5';
+import { store } from '../core/store.js?v=0.3.1-self.5';
+import { flushMirror, getMirrorStatus, mirrorNow, onMirrorStatus, restoreFromServer, whenStarted } from '../core/backupService.js?v=0.3.1-self.5';
+import { getVersion } from '../core/updateService.js?v=0.3.1-self.5';
+import { createPanel } from './annotationsPanel.js?v=0.3.1-self.5';
+import { backupStatus, describeStoreError, exportBackup, pickAndImport } from './backup.js?v=0.3.1-self.5';
+import { annotationToFloor, countCardSelections, createPieceCache, listCardSelections, MAX_CARD_FLOORS, mergeCardSelections, removeCardSelection, selectionToFloors, wholeFloor } from './cardPieces.js?v=0.3.1-self.5';
+import { createCardStudio } from './cardStudio.js?v=0.3.1-self.5';
+import { copyText, h, iconButton, isTypingTarget, toast } from './dom.js?v=0.3.1-self.5';
+import { isFavoriteChat, loadFavoriteChats, onFavoriteChatsChange, resetFavoriteChats, toggleFavoriteChat } from './chatFavorites.js?v=0.3.1-self.5';
+import { createDrawer } from './drawer.js?v=0.3.1-self.5';
+import { createHtmlManager } from './htmlBlocks.js?v=0.3.1-self.5';
+import { createHtmlShot } from './htmlShot.js?v=0.3.1-self.5';
+import { buildFloor, buildSwipeControl, fillFloor, floorFault, floorPlainText, syncBookmarkMarks } from './floorToolbar.js?v=0.3.1-self.5';
+import { effectivePrefs, faultReport, foldRuns, followPlacement, formatStamp, isFolded, mirrorStatusText, parseJumpInput, pickSwipe, progressText, restoreSummary, swipePreviews } from './logic.js?v=0.3.1-self.5';
+import { createMarks, highlightSupported } from './marks.js?v=0.3.1-self.5';
+import { flushProgress, getPrefs, getProgress, lastRead, loadPrefs, onPrefsChange, reloadPrefs, rememberSwipe, setPrefs, setReadPosition } from './prefs.js?v=0.3.1-self.5';
+import { createSelectionUi } from './selectionPopover.js?v=0.3.1-self.5';
+import { hasRedaction, redactString, setRedactState, visibleText } from './redact.js?v=0.3.1-self.5';
+import { createSettingsBar } from './settingsBar.js?v=0.3.1-self.5';
+import { createRulesManager } from './rulesUi.js?v=0.3.1-self.5';
+import { createDocPanel } from './docPanel.js?v=0.3.1-self.5';
+import { createVersionRow, maybeShowWhatsNew } from './updateUi.js?v=0.3.1-self.5';
 
 const PAGE_SIZE = 30;      // 每批楼数，与 core 默认一致（03 §4.5）
 const MAX_PAGES = 4;       // DOM 里同时最多保留几批，其余释放（NF2）
@@ -100,7 +100,8 @@ export async function openReader({ tab, chatKey } = {}) {
         chromeTimer: null, wheelAt: 0, wheelSum: 0, statusTimer: null, redact: null,
         prebuilt: new Map(), renderVersion: 0, prebuildJob: 0, // T82：空闲时先建好的前后批
         banner: null, staleOff: null, reloading: false, restoring: false,
-        cardSelections: [], collectionBar: null, collectionCount: null,
+        cardSelections: [], cardSelectionHistory: [], collectionCache: createPieceCache(), collectionExpanded: false,
+        collectionBar: null, collectionCount: null, collectionRows: [],
     };
     S = session;
     session.marks = createMarks({
@@ -568,7 +569,10 @@ function onClick(event) {
             case 'bookmark-swipe': if (mes) toggleBookmark(mes, true); return;
             case 'card': if (mes) openCardForFloor(mes); return;
             case 'card-collection-open': openCollectedCard(); return;
-            case 'card-collection-clear': clearCardCollection(session); say('已清空选段'); return;
+            case 'card-collection-list': session.collectionExpanded = !session.collectionExpanded; syncCardCollection(session); return;
+            case 'card-collection-remove': removeCollectedCardSelection(session, Number(actEl.dataset.selectionRow)); return;
+            case 'card-collection-undo': undoCardCollection(session); return;
+            case 'card-collection-clear': clearCardCollection(session, true); say('已清空选段，可点撤销恢复'); return;
             default: break;
         }
     }
@@ -769,6 +773,7 @@ function refreshSideTexts(session) {
     setTitles(session);
     session.panel.refresh();
     session.drawer.refreshList?.();
+    if (session.collectionExpanded) syncCardCollection(session);
     session.follow.dataset.key = '';
     updateFollower();
 }
@@ -944,7 +949,7 @@ function openCardFromSelection(range) {
     const floors = mergeCardSelections(session.cardSelections, picked);
     if (!withinCardLimit(floors)) return;
     // 已在收集时，把最后这一段也留在集合里；关闭工作台后仍能继续补选。
-    if (session.cardSelections.length) { session.cardSelections = floors; syncCardCollection(session); }
+    if (session.cardSelections.length) setCardCollection(session, floors);
     getSelection()?.removeAllRanges();
     openStudio({ handle: session.handle, ownsHandle: false, kind: 'selection', floors, selectionCount: countCardSelections(floors), annotations: session.marks.records(),
         includeReasoning: floors.some(floor => floor.reasoning) });
@@ -953,10 +958,13 @@ function openCardFromSelection(range) {
 /** 持续入口占用独立一行，正文视口让位；窄屏换行也不会遮住文字。 */
 function mountCardCollection(session) {
     session.collectionCount = h('span', { class: 'stcr-collection-count', role: 'status', 'aria-live': 'polite' });
+    session.collectionOpen = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-open', text: '制作卡片' });
+    session.collectionToggle = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-list', 'aria-expanded': 'false', text: '查看选段' });
+    session.collectionUndo = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-undo', text: '撤销', title: '撤销上一次加入、删除或清空' });
+    session.collectionClear = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-clear', text: '清空' });
+    session.collectionList = h('div', { class: 'stcr-collection-list', hidden: true, role: 'list', 'aria-label': '选段列表' });
     session.collectionBar = h('div', { class: 'stcr-collectionbar', hidden: true, role: 'toolbar', 'aria-label': '已收集的卡片选段' },
-        session.collectionCount,
-        h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-open', text: '制作卡片' }),
-        h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-clear', text: '清空' }));
+        session.collectionCount, session.collectionToggle, session.collectionOpen, session.collectionUndo, session.collectionClear, session.collectionList);
     session.main.append(session.collectionBar);
     const fit = () => {
         if (S !== session) return;
@@ -973,12 +981,63 @@ function syncCardCollection(session) {
     const count = countCardSelections(session.cardSelections);
     session.collectionCount.textContent = `已选 ${count} 段`;
     session.collectionCount.title = '可继续选中文字并加入选段；同楼不同候选分别保留。切换聊天或重新读取会清空。';
-    session.collectionBar.hidden = count === 0;
+    session.collectionBar.hidden = count === 0 && !session.cardSelectionHistory.length;
+    session.collectionOpen.disabled = session.collectionClear.disabled = session.collectionToggle.disabled = count === 0;
+    session.collectionUndo.disabled = session.cardSelectionHistory.length === 0;
+    const expanded = session.collectionExpanded && count > 0;
+    session.collectionToggle.textContent = expanded ? '收起选段' : '查看选段';
+    session.collectionToggle.setAttribute('aria-expanded', String(expanded));
+    session.collectionList.hidden = !expanded;
+    if (expanded && session.handle) {
+        try {
+            session.collectionRows = listCardSelections(session.handle, session.cardSelections, session.collectionCache,
+                { displayText: text => redactString(text, session.chatKey) });
+            session.collectionList.replaceChildren(...session.collectionRows.map((row, i) => h('div', { class: 'stcr-collection-item', role: 'listitem' },
+                h('div', { class: 'stcr-collection-label', text: `第 ${row.index + 1} 楼 · 候选 ${row.swipe + 1} · ${row.part === 'body' ? '正文' : '思维链'}` }),
+                h('div', { class: 'stcr-collection-preview', text: row.text || '（空片段）' }),
+                h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-act': 'card-collection-remove', 'data-selection-row': i,
+                    'aria-label': `删除第 ${i + 1} 段`, text: '删除' }))));
+        } catch (error) {
+            session.collectionRows = [];
+            session.collectionList.replaceChildren(h('p', { text: `选段预览暂时无法显示：${error.message ?? error}` }));
+        }
+    } else {
+        session.collectionRows = [];
+        session.collectionList.replaceChildren();
+    }
     session.fitCardCollection();
 }
 
-function clearCardCollection(session) {
+function setCardCollection(session, floors) {
+    const next = mergeCardSelections(floors);
+    if (JSON.stringify(next) === JSON.stringify(session.cardSelections)) return false;
+    session.cardSelectionHistory.push(session.cardSelections);
+    if (session.cardSelectionHistory.length > 20) session.cardSelectionHistory.shift();
+    session.cardSelections = next;
+    syncCardCollection(session);
+    return true;
+}
+
+function undoCardCollection(session) {
+    if (!session.cardSelectionHistory.length) return;
+    session.cardSelections = session.cardSelectionHistory.pop();
+    syncCardCollection(session);
+    say('已撤销上一次选段操作');
+}
+
+function removeCollectedCardSelection(session, index) {
+    const row = session.collectionRows[index];
+    if (!row) return;
+    setCardCollection(session, removeCardSelection(session.cardSelections, row));
+    say('已删除这一段，可点撤销恢复');
+}
+
+function clearCardCollection(session, undoable = false) {
+    if (undoable) { setCardCollection(session, []); return; }
     session.cardSelections = [];
+    session.cardSelectionHistory = [];
+    session.collectionCache = createPieceCache();
+    session.collectionExpanded = false;
     if (session.collectionBar) syncCardCollection(session);
 }
 
@@ -996,9 +1055,8 @@ function collectCardSelection(range) {
     if (!picked.length) { say('这段选区里没有正文文字'); return; }
     const floors = mergeCardSelections(session.cardSelections, picked);
     if (!withinCardLimit(floors)) return;
-    session.cardSelections = floors;
+    setCardCollection(session, floors);
     getSelection()?.removeAllRanges();
-    syncCardCollection(session);
     say(`已收集 ${countCardSelections(floors)} 段，可以继续选别处`);
 }
 
@@ -1804,7 +1862,7 @@ function originalCode(code) {
 async function maskedCodeText(text, model) {
     const options = await htmlMaskOptions(S, model);
     if (!/<[a-z!][^>]*>/i.test(text)) {
-        const { maskCodeText } = await import('../core/cardExport.js');
+        const { maskCodeText } = await import('../core/cardExport.js?v=0.3.1-self.5');
         return maskCodeText(text, options);
     }
     const masked = await maskHtmlString(text, options);

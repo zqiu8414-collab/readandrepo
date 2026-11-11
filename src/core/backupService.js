@@ -4,8 +4,8 @@
 // 只用 ST 自带的 /api/files/upload、/verify、/delete 与静态 /user/files/：不在 chats 目录，不碰聊天（D02）。
 // 删除只针对本扩展自己命名的日备份 st-reader-backup-YYYYMMDD.json。
 
-import { store as defaultStore } from './store.js';
-import { hostSettings as defaultHost } from './hostSettings.js';
+import { store as defaultStore } from './store.js?v=0.3.1-self.5';
+import { hostSettings as defaultHost } from './hostSettings.js?v=0.3.1-self.5';
 
 export const MAIN_FILE = 'st-reader-backup.json';
 const DAILY = /^st-reader-backup-(\d{8})\.json$/;

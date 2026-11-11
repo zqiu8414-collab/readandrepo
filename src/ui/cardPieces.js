@@ -6,11 +6,11 @@
 // 片段一律是克隆出来的新节点：绝不把绑定过原文的楼层放进卡片，导出时用 replaceNames:false 不会还原真名。
 // 只读（D02）：只读 handle，不写聊天、不改候选。
 
-import { getAnchorText, locateAnchorText } from '../core/anchor.js';
-import { automaticNameRules, createCardMessage } from '../core/cardExport.js';
-import { renderMessage } from '../core/formatter.js';
-import { replaceLiteralNames } from '../core/textTransforms.js';
-import { alignTexts, isSystemLike, mapOffset } from './logic.js';
+import { getAnchorText, locateAnchorText } from '../core/anchor.js?v=0.3.1-self.5';
+import { automaticNameRules, createCardMessage } from '../core/cardExport.js?v=0.3.1-self.5';
+import { renderMessage } from '../core/formatter.js?v=0.3.1-self.5';
+import { replaceLiteralNames } from '../core/textTransforms.js?v=0.3.1-self.5';
+import { alignTexts, isSystemLike, mapOffset } from './logic.js?v=0.3.1-self.5';
 
 /** 思维链在前、正文在后，与楼层里的顺序一致。 */
 const PARTS = Object.freeze([['reasoning', '.mes_reasoning'], ['body', '.mes_text']]);
@@ -49,6 +49,38 @@ export function mergeCardSelections(...groups) {
 /** 归并后不连续段数；跨正文/思维链分别计数。 */
 export const countCardSelections = floors => floors.reduce((count, floor) => count + PARTS.reduce((sum, [part]) =>
     sum + (floor[part] === 'all' ? 1 : rangesOf(floor[part]).length), 0), 0);
+
+/** 列表逐段展示；只有短摘录进入界面，不保留额外的原文 DOM。 */
+export function listCardSelections(handle, floors, cache, { displayText = text => text } = {}) {
+    return mergeCardSelections(floors).flatMap(floor => PARTS.flatMap(([part]) => {
+        if (!floor[part]) return [];
+        const text = readerText(cache, handle, floor.index, floor.swipe, part);
+        // 先处理完整原文再取摘录，避免边界或180字截断切断屏蔽词，露出半个原名。
+        const shown = displayText(text);
+        const aligned = shown === text ? null : alignTexts(text, shown);
+        const picks = floor[part] === 'all' ? ['all'] : rangesOf(floor[part]);
+        return picks.map((pick, rangeIndex) => {
+            let excerpt;
+            try {
+                excerpt = (pick === 'all' ? shown : shown.slice(aligned ? mapOffset(aligned, pick.start, 'start') : pick.start,
+                    aligned ? mapOffset(aligned, pick.end, 'end') : pick.end)).trim();
+            } catch {
+                excerpt = '（此段脱敏预览无法定位，请打开分享卡片查看）';
+            }
+            return { index: floor.index, swipe: floor.swipe, part, rangeIndex, text: excerpt.slice(0, 180) + (excerpt.length > 180 ? '…' : '') };
+        });
+    }));
+}
+
+/** 只删目标片段；其他区域、其他候选及同楼其他不连续范围不变。 */
+export function removeCardSelection(floors, target) {
+    return mergeCardSelections(floors).map(floor => {
+        if (floor.index !== target.index || floor.swipe !== target.swipe) return floor;
+        const pick = floor[target.part];
+        const kept = pick === 'all' ? null : rangesOf(pick).filter((_, i) => i !== target.rangeIndex);
+        return { ...floor, [target.part]: kept };
+    }).filter(floor => floor.body === 'all' || floor.reasoning === 'all' || rangesOf(floor.body).length || rangesOf(floor.reasoning).length);
+}
 
 const isShown = el => el.getClientRects().length > 0;
 
@@ -128,21 +160,59 @@ function cardTextNodes(root) {
     return nodes;
 }
 
-/** 按文字位置在副本上取一段（起点落在下一个字、终点落在上一个字，边界上的图标不带进来）。 */
-function cloneByOffsets(root, start, end) {
-    if (end <= start) return null;
-    const nodes = cardTextNodes(root);
-    const range = root.ownerDocument.createRange();
-    let offset = 0, began = false, ended = false;
-    for (const node of nodes) {
-        const next = offset + node.data.length;
-        if (!began && start < next) { range.setStart(node, start - offset); began = true; }
-        if (began && end <= next) { range.setEnd(node, end - offset); ended = true; break; }
-        offset = next;
+/** 同一区域只扫描一次，多段共用累计文字位置。 */
+function indexCardText(root) {
+    let offset = 0;
+    const entries = cardTextNodes(root).filter(node => node.data.length).map(node => {
+        const start = offset;
+        offset += node.data.length;
+        return { node, start, end: offset };
+    });
+    return { entries, length: offset, text: entries.map(({ node }) => node.data).join('') };
+}
+
+function textBoundary(index, offset, end) {
+    let lo = 0, hi = index.entries.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (end ? index.entries[mid].end < offset : index.entries[mid].end <= offset) lo = mid + 1;
+        else hi = mid;
     }
-    if (!began) return null;
-    if (!ended) range.setEnd(root, root.childNodes.length);
-    return range.cloneContents();
+    const entry = index.entries[lo];
+    return entry ? { node: entry.node, offset: offset - entry.start } : null;
+}
+
+/** 只克隆选中字，补回共同祖先上的段落/加粗/颜色，绝不复制其相邻正文。 */
+function cloneByOffsets(root, start, end, index) {
+    if (end <= start) return null;
+    const begin = textBoundary(index, start, false), finish = textBoundary(index, Math.min(end, index.length), true);
+    if (!begin || !finish) return null;
+    const range = root.ownerDocument.createRange();
+    range.setStart(begin.node, begin.offset);
+    range.setEnd(finish.node, finish.offset);
+    let fragment = range.cloneContents();
+    let ancestor = range.commonAncestorContainer;
+    if (ancestor.nodeType !== 1) ancestor = ancestor.parentElement;
+    while (ancestor && ancestor !== root) {
+        const shell = ancestor.cloneNode(false);
+        shell.removeAttribute('contenteditable');
+        shell.removeAttribute('tabindex');
+        for (const attr of [...shell.attributes]) if (/^on/i.test(attr.name)) shell.removeAttribute(attr.name);
+        // 选中折叠块内的正文必须在卡片上看得见。
+        if (shell.tagName === 'DETAILS') shell.open = true;
+        shell.append(fragment);
+        fragment = root.ownerDocument.createDocumentFragment();
+        fragment.append(shell);
+        ancestor = ancestor.parentElement;
+    }
+    return fragment;
+}
+
+/** 楼内 CSS 可能在选区前；保留一次，由工作台 scopeFloorStyles 限定到该楼。 */
+function retainPieceStyles(source, fragment) {
+    if (!fragment) return;
+    for (const style of fragment.querySelectorAll('style')) style.remove();
+    fragment.prepend(...[...source.querySelectorAll('style')].map(style => style.cloneNode(true)));
 }
 
 function cloneChildren(root) {
@@ -182,15 +252,16 @@ export async function buildPieces(handle, floors, options, cache) {
             let fragment;
             if (pick === 'all') fragment = cloneChildren(source);
             else {
-                const segments = alignTexts(readerText(cache, handle, floor.index, floor.swipe, part), cardTextNodes(source).map(node => node.data).join(''));
+                const index = indexCardText(source);
+                const segments = alignTexts(readerText(cache, handle, floor.index, floor.swipe, part), index.text);
                 // 名字替换会把半个名字扩展成完整替换词；在映射后的坐标再归并，避免同一替换词重复。
                 const mapped = mergeRanges(rangesOf(pick).map(at => ({ start: mapOffset(segments, at.start, 'start'), end: mapOffset(segments, at.end, 'end') })));
                 const ranges = rangesOf(mapped);
-                if (ranges.length === 1) fragment = cloneByOffsets(source, ranges[0].start, ranges[0].end);
+                if (ranges.length === 1) fragment = cloneByOffsets(source, ranges[0].start, ranges[0].end, index);
                 else {
                     fragment = source.ownerDocument.createDocumentFragment();
                     for (const at of ranges) {
-                        const excerpt = cloneByOffsets(source, at.start, at.end);
+                        const excerpt = cloneByOffsets(source, at.start, at.end, index);
                         if (!hasContent(excerpt)) continue;
                         const block = source.ownerDocument.createElement('div');
                         block.className = 'stcr-card-excerpt';
@@ -198,6 +269,7 @@ export async function buildPieces(handle, floors, options, cache) {
                         fragment.append(block);
                     }
                 }
+                if (part === 'body' && hasContent(fragment)) retainPieceStyles(source, fragment);
             }
             if (hasContent(fragment)) piece[part] = fragment;
         }

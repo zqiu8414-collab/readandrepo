@@ -1,10 +1,10 @@
 // ST Reader — AGPL-3.0
-import { replaceNamesInRaw, maskText } from './cardTransforms.js';
-import { maskCodeText, maskHtmlString } from './codeTransforms.js';
-import { replaceLiteralNames } from './textTransforms.js';
-import { createStore, bookmarkId } from './store.js';
-import { memoryStorage } from './persistence.test.js';
-import { createSelfTestRunner } from './selfTestRunner.js';
+import { replaceNamesInRaw, maskText } from './cardTransforms.js?v=0.3.1-self.5';
+import { maskCodeText, maskHtmlString } from './codeTransforms.js?v=0.3.1-self.5';
+import { replaceLiteralNames } from './textTransforms.js?v=0.3.1-self.5';
+import { createStore, bookmarkId } from './store.js?v=0.3.1-self.5';
+import { memoryStorage } from './persistence.test.js?v=0.3.1-self.5';
+import { createSelfTestRunner } from './selfTestRunner.js?v=0.3.1-self.5';
 
 const assert = (value, message = '断言失败') => { if (!value) throw new Error(message); };
 const sorted = value => Array.isArray(value) ? value.map(sorted) : value && typeof value === 'object'

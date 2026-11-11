@@ -1,11 +1,11 @@
 // ST Reader — AGPL-3.0
-import { foreignExtensionSettings } from './hostSettings.js';
-import { createSandbox, renderStatic, exportRenderedHtml } from './htmlRenderer.js';
-import { maskHtmlString, transformHtmlOffline } from './codeTransforms.js';
+import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.5';
+import { createSandbox, renderStatic, exportRenderedHtml } from './htmlRenderer.js?v=0.3.1-self.5';
+import { maskHtmlString, transformHtmlOffline } from './codeTransforms.js?v=0.3.1-self.5';
 import { PHONE_HTML, GAME_HTML } from '../../dev/fixtures/html.mjs';
-import { createCropPreview } from './htmlCropPreview.js';
-import { testHtmlBoundaryBrowser } from './htmlBoundaryBrowser.test.js';
-import { testHtmlHeightBrowser } from './htmlHeightBrowser.test.js';
+import { createCropPreview } from './htmlCropPreview.js?v=0.3.1-self.5';
+import { testHtmlBoundaryBrowser } from './htmlBoundaryBrowser.test.js?v=0.3.1-self.5';
+import { testHtmlHeightBrowser } from './htmlHeightBrowser.test.js?v=0.3.1-self.5';
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const selector = '[data-stcr-html-frame],[data-stcr-html-static],[data-stcr-parse-frame]';

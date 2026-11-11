@@ -1,7 +1,7 @@
 // ST Reader — AGPL-3.0
-import { detectHtmlBlocks, buildSrcdoc } from './htmlRenderer.js';
+import { detectHtmlBlocks, buildSrcdoc } from './htmlRenderer.js?v=0.3.1-self.5';
 import { PHONE_HTML, GAME_HTML, HTML_MESSAGES, SCENE_HTML, MIXED_HTML, MULTI_HTML, SECOND_SCENE_HTML, COMMUNITY_HTML, COMMUNITY_BOX_HTML } from '../../dev/fixtures/html.mjs';
-import { captureGeometry, previewPoint, dragCrop } from './htmlCrop.js';
+import { captureGeometry, previewPoint, dragCrop } from './htmlCrop.js?v=0.3.1-self.5';
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 export function testHtmlRendererLogic() {
     const results = [], test = (name, run) => { run(); results.push({ name: `T44a ${name}`, passed: true }); };

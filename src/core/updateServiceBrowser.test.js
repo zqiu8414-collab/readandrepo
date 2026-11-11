@@ -1,8 +1,8 @@
 // ST Reader — AGPL-3.0
-import { createUpdateService, updateService } from './updateService.js';
-import { isDevInstance } from './readonlyGuard.js';
-import { store } from './store.js';
-import { hostSettings } from './hostSettings.js';
+import { createUpdateService, updateService } from './updateService.js?v=0.3.1-self.5';
+import { isDevInstance } from './readonlyGuard.js?v=0.3.1-self.5';
+import { store } from './store.js?v=0.3.1-self.5';
+import { hostSettings } from './hostSettings.js?v=0.3.1-self.5';
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 function requireDev() { if (!isDevInstance(location)) throw new Error('版本自测只允许 .dev 开发实例'); }

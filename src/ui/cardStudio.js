@@ -8,18 +8,20 @@
 // T23b：我的替换规则（右侧"管理替换规则…"子页、预览里"总是替换为…"、映射列表每行可改）与我导入的图片
 // （小图案遮盖、替换图案、书摘封面）。规则与图片走 store.replaceRules / store.assets，随备份导出。
 
-import { exportCard, ruleWords, wrapMaskSpans } from '../core/cardExport.js';
-import { store } from '../core/store.js';
-import { getVersion } from '../core/updateService.js';
-import { buildPieces, createPieceCache, findThoughts, scrubNote } from './cardPieces.js?v=0.3.1-self.4';
-import { createCardMarks } from './cardMarks.js';
-import { COLORS } from './marks.js';
-import { colorPicker, readableOn } from './colorPicker.js';
-import { getPrefs } from './prefs.js';
-import { copyText, h, iconButton } from './dom.js';
-import { scopeFloorStyles } from './floorToolbar.js';
-import { CARD_ICON_CHOICES, CARD_SIZES, cardExportReport, cardFileName, cleanHexColor, cleanMaskWord, normalizeCardPrefs, wordAt } from './logic.js';
-import { createRuleEditor, createRulesManager, importAsset, patternGlyph, patternPicker, ruleScopes, textTarget } from './rulesUi.js';
+import { exportCard, ruleWords, wrapMaskSpans } from '../core/cardExport.js?v=0.3.1-self.5';
+import { store } from '../core/store.js?v=0.3.1-self.5';
+import { getVersion } from '../core/updateService.js?v=0.3.1-self.5';
+import { waitForExport } from '../core/exportControl.js?v=0.3.1-self.5';
+import { buildPieces, createPieceCache, findThoughts, scrubNote } from './cardPieces.js?v=0.3.1-self.5';
+import { createCardMarks } from './cardMarks.js?v=0.3.1-self.5';
+import { captureEdits, restoreEdits, pushEditHistory, cardDraftKey, createCardDraftCache } from './cardDrafts.js?v=0.3.1-self.5';
+import { COLORS } from './marks.js?v=0.3.1-self.5';
+import { colorPicker, readableOn } from './colorPicker.js?v=0.3.1-self.5';
+import { getPrefs } from './prefs.js?v=0.3.1-self.5';
+import { copyText, h, iconButton } from './dom.js?v=0.3.1-self.5';
+import { scopeFloorStyles } from './floorToolbar.js?v=0.3.1-self.5';
+import { CARD_ICON_CHOICES, CARD_SIZES, cardExportReport, cardFileName, cleanHexColor, cleanMaskWord, normalizeCardPrefs, wordAt } from './logic.js?v=0.3.1-self.5';
+import { createRuleEditor, createRulesManager, importAsset, patternGlyph, patternPicker, ruleScopes, textTarget } from './rulesUi.js?v=0.3.1-self.5';
 
 const PREFS_KEY = 'stcr:ui:card:v1';
 /** 永久屏蔽词各自的遮盖样式（T23a 验收意见①）：{词: {mask, icon|asset|color}}；没有的词跟随默认。随备份导出。 */
@@ -34,6 +36,8 @@ const PAPER_RED = '#8a3a2e';
 const DIGEST_BLUE = '#1b88ee';
 const EDIT_PART = '[data-stcr-card-edit]';
 const EDIT_ATOMIC = '.stcr-mask, [data-stcr-protected], style, img, svg';
+// 同一页面中关闭阅读器再打开也可恢复；刷新页面后自动释放。
+const draftCache = createCardDraftCache();
 
 /** 存储里的 {词: {mask, icon|asset|color}} → 只留合法项；用到的图片已被删掉就退回默认图案。 */
 function cleanWordStyles(raw, assets) {
@@ -81,12 +85,24 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             wordStyles: {}, tempStyles: {}, menu: null, rules: [], assets: [], scopes: null, rulesPage: null,
             marks: createCardMarks(), selectionTimer: 0, selectionListener: null,
             drafts: new Map(), editing: null, rebuilding: false,
+            undo: [], redo: [], editBefore: null, draftKey: null,
+            loaded: false, loading: false, composeTimer: 0, exportScale: 2, exportController: null,
         };
         st = mine;
         root.append(els.studio);
         els.studio.focus({ preventScroll: true });
         wire(mine);
         els.sub.textContent = subtitle(source);
+        await loadSettings(mine);
+    }
+
+    async function loadSettings(mine) {
+        if (st !== mine || mine.loading) return;
+        const { source } = mine;
+        mine.loading = true;
+        mine.loaded = false;
+        mine.els.exportBtn.disabled = true;
+        mine.els.retry.disabled = true;
         try {
             const [prefs, words, styles, rules, assets] = await Promise.all([store.settings.get(PREFS_KEY, null), store.maskWords.list(),
                 store.settings.get(WORD_STYLES_KEY, {}), store.replaceRules.list(), store.assets.list()]);
@@ -96,13 +112,28 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             mine.rules = rules;
             setAssets(mine, assets);
             mine.wordStyles = cleanWordStyles(styles, assets);
+            mine.draftKey = cardDraftKey(source, rules, assets);
+            const restored = draftCache.restore(mine.draftKey, mine);
+            setAssets(mine, assets);
+            mine.loaded = true;
+            mine.els.retry.hidden = true;
+            showNote(mine, '');
+            if (restored) toast('已恢复这组选段的会话草稿（刷新页面后清空）');
         } catch (error) {
+            if (st !== mine) return;
             console.warn('[st-reader] 卡片设置或屏蔽词读取失败：', error);
-            showNote(mine, `屏蔽词读取失败：${error.message ?? error}。请先别导出。`, 'error');
+            showNote(mine, `卡片设置读取失败：${error.message ?? error}。重新读取成功后才能导出。`, 'error');
+            mine.els.retry.hidden = false;
+            syncEditControls(mine);
+            return;
+        } finally {
+            mine.loading = false;
+            mine.els.retry.disabled = false;
         }
         if (st !== mine) return;
         // 作用范围的角色名要读角色列表，不挡预览
-        ruleScopes(source.handle.chatKey).then(scopes => { if (st === mine) mine.scopes = scopes; });
+        ruleScopes(source.handle.chatKey).then(scopes => { if (st === mine) mine.scopes = scopes; })
+            .catch(error => console.warn('[st-reader] 卡片规则作用范围读取失败：', error));
         syncControls(mine);
         await rebuild(mine);
     }
@@ -144,6 +175,8 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             h('i', { class: 'fa-solid fa-download', 'aria-hidden': 'true' }), h('span', { class: 'stcr-studio-export-label', text: '导出 PNG' }));
         const sub = h('span', { class: 'stcr-studio-sub' });
         const editBtn = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn stcr-studio-edit', 'data-studio': 'edit', disabled: true, text: '编辑内容' });
+        const undoBtn = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-studio': 'undo-edit', disabled: true, text: '撤销编辑' });
+        const redoBtn = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-studio': 'redo-edit', disabled: true, text: '重做' });
         const head = h('header', { class: 'stcr-studio-head' },
             iconButton('fa-xmark', '关闭（Esc）', { 'data-studio': 'close' }),
             h('h2', { class: 'stcr-studio-title', text: '分享卡片' }), sub, editBtn, exportBtn);
@@ -154,7 +187,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const status = h('div', { class: 'stcr-studio-status', role: 'status', 'aria-live': 'polite' });
         const editHint = h('span', { role: 'status' });
         const resetEdit = h('button', { type: 'button', class: 'stcr-btn stcr-text-btn', 'data-studio': 'reset-edit', text: '恢复原文' });
-        const editInfo = h('div', { class: 'stcr-studio-edit-info', hidden: true }, editHint, resetEdit);
+        const editInfo = h('div', { class: 'stcr-studio-edit-info', hidden: true }, editHint, undoBtn, redoBtn, resetEdit);
         const stage = h('div', { class: 'stcr-studio-stage' },
             editInfo, slot, hover, status,
             h('p', { class: 'stcr-studio-tip', text: '拖选正文可选择四色划线或临时遮住；点已有划线可换色或取消。划线只保留在当前卡片，导出 PNG 会带上。点普通词仍可直接遮住，点遮盖可调整样式。' }),
@@ -170,6 +203,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             ...TEMPLATES.map(item => h('button', { type: 'button', class: 'stcr-btn stcr-tpl-btn', 'data-tpl': item.id },
                 h('span', { class: `stcr-tpl-swatch stcr-tpl-swatch--${item.id}`, 'aria-hidden': 'true' }, h('i'), h('i')), h('span', { text: item.label }))));
         const sizes = seg(Object.entries(CARD_SIZES).map(([id, size]) => ({ id, label: size.label })), 'size');
+        const quality = seg([{ id: '1', label: '标准' }, { id: '2', label: '高清' }], 'quality');
         const masks = seg(MASKS, 'mask');
         const maskColor = h('div', { class: 'stcr-studio-color-box' }); // 色块 / 图标颜色，syncControls 里重画
         const icons = h('div', { class: 'stcr-studio-icon-box' }); // 图案选择条，syncControls 里按当前图片重画
@@ -204,10 +238,12 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const tempChips = h('div', { class: 'stcr-studio-chips' });
         const tempSec = section('临时遮住（只这张卡）', tempChips);
         const note = h('div', { class: 'stcr-studio-note', role: 'status', 'aria-live': 'polite' });
+        const retry = h('button', { type: 'button', class: 'stcr-btn', 'data-studio': 'retry-settings', hidden: true, text: '重新读取设置' });
 
         const sideMain = h('div', { class: 'stcr-studio-side-main' },
             section('模板', tpl),
             section('尺寸', sizes),
+            section('导出清晰度', quality, h('p', { class: 'stcr-studio-hint', text: '标准较省内存；高清为两倍尺寸。长卡片建议标准。' })),
             section('遮盖样式', masks, maskColor, icons, uniform.el, h('p', { class: 'stcr-studio-hint', text: '这是默认样式。想让某个词不一样：点预览里它的遮盖，或点下面词条左边的小方块。' })),
             section('名字替换', autoNames.el, myRules.el, mapList,
                 h('p', { class: 'stcr-studio-hint', text: '优先级：我的规则 > 自动 > 屏蔽词；长词先换，但不会把一个名字拆开。点一行右边的笔可以改它。' }), rulesBtn),
@@ -215,12 +251,12 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             digest,
             h('section', { class: 'stcr-studio-sec' }, wordToggle, wordBox),
             tempSec,
-            note);
+            note, retry);
         const rulesHost = h('div', { class: 'stcr-studio-side-rules', hidden: true });
         const side = h('aside', { class: 'stcr-studio-side', 'aria-label': '卡片设置' }, sideMain, rulesHost);
         const studio = h('div', { class: 'stcr-studio', role: 'dialog', 'aria-modal': 'true', 'aria-label': '分享卡片', tabindex: '-1' },
             head, h('div', { class: 'stcr-studio-body' }, stage, side));
-        return { studio, head, exportBtn, editBtn, editInfo, editHint, resetEdit, sub, stage, slot, scaler, hover, status, side, sideMain, rulesHost, rulesBtn, cover, tpl, sizes, masks, maskColor, icons, uniform, autoNames, myRules, mapList,
+        return { studio, head, exportBtn, editBtn, undoBtn, redoBtn, quality, retry, editInfo, editHint, resetEdit, sub, stage, slot, scaler, hover, status, side, sideMain, rulesHost, rulesBtn, cover, tpl, sizes, masks, maskColor, icons, uniform, autoNames, myRules, mapList,
             showNames, reasoning, signOn, signText, digest, digestSource, digestTitle, accent, wordCount, wordToggle, wordBox, wordChips, wordInput,
             tempSec, tempChips, note };
     }
@@ -254,14 +290,18 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const prefChange = patch => changePrefs(mine, patch);
         els.tpl.addEventListener('click', event => { const id = event.target.closest('[data-tpl]')?.dataset.tpl; if (id) prefChange({ template: id }); });
         els.sizes.addEventListener('click', event => { const id = event.target.closest('[data-size]')?.dataset.size; if (id) prefChange({ size: id }); });
+        els.quality.addEventListener('click', event => {
+            const value = Number(event.target.closest('[data-quality]')?.dataset.quality);
+            if (!mine.exporting && [1, 2].includes(value)) { mine.exportScale = value; syncControls(mine); }
+        });
         els.masks.addEventListener('click', event => { const id = event.target.closest('[data-mask]')?.dataset.mask; if (id) prefChange({ mask: id }); });
         els.accent.addEventListener('click', event => { const id = event.target.closest('[data-accent]')?.dataset.accent; if (id) prefChange({ digestAccent: id }); });
         els.uniform.input.addEventListener('change', () => prefChange({ uniform: els.uniform.input.checked }));
         els.showNames.input.addEventListener('change', () => prefChange({ showNames: els.showNames.input.checked }));
         els.signOn.input.addEventListener('change', () => prefChange({ signatureOn: els.signOn.input.checked }));
         els.digestSource.input.addEventListener('change', () => prefChange({ digestSourceOn: els.digestSource.input.checked }));
-        els.signText.addEventListener('input', () => prefChange({ signature: els.signText.value }));
-        els.digestTitle.addEventListener('input', () => prefChange({ digestTitle: els.digestTitle.value }));
+        els.signText.addEventListener('input', () => changePrefs(mine, { signature: els.signText.value }, true));
+        els.digestTitle.addEventListener('input', () => changePrefs(mine, { digestTitle: els.digestTitle.value }, true));
         els.reasoning.input.addEventListener('change', () => {
             if (!alive() || mine.exporting) return;
             mine.includeReasoning = els.reasoning.input.checked;
@@ -321,8 +361,10 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         if (styleBtn) { openMenu(mine, styleBtn.dataset.wordStyle, styleBtn); return; }
         const act = target.closest('[data-studio]')?.dataset.studio;
         if (act === 'close') { close(); return; }
+        if (act === 'retry-settings') { loadSettings(mine); return; }
         if (act === 'export') { doExport(mine); return; }
         if (act === 'edit') { if (mine.editing) finishEdit(mine); else beginEdit(mine); return; }
+        if (act === 'undo-edit' || act === 'redo-edit') { moveEditHistory(mine, act === 'undo-edit'); return; }
         if (act === 'reset-edit') { resetEdits(mine); return; }
         if (mine.editing) {
             if (target.closest('a')) event.preventDefault();
@@ -347,12 +389,27 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         if (mine.card && mine.card.contains(target)) onCardClick(mine, event);
     }
 
-    function changePrefs(mine, patch) {
-        if (st !== mine || mine.exporting) return;
+    function changePrefs(mine, patch, delayed = false) {
+        if (st !== mine || mine.exporting || !mine.loaded) return;
         Object.assign(mine.prefs, patch);
         savePrefs(mine);
+        clearTimeout(mine.composeTimer);
+        if (delayed) {
+            mine.composeTimer = setTimeout(() => {
+                mine.composeTimer = 0;
+                if (st === mine) { syncControls(mine); compose(mine); }
+            }, 150);
+            return;
+        }
+        mine.composeTimer = 0;
         syncControls(mine);
         compose(mine);
+    }
+
+    function flushCompose(mine) {
+        if (!mine.composeTimer) return;
+        clearTimeout(mine.composeTimer); mine.composeTimer = 0;
+        syncControls(mine); compose(mine);
     }
 
     // ───────────── 预览文字编辑 ─────────────
@@ -360,6 +417,9 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     /** 只给卡片副本开放原地编辑，退出编辑后按当前模板和遮盖设置重新排版。 */
     function beginEdit(mine) {
         if (mine.els.editBtn.disabled || mine.exporting || !mine.card) return;
+        flushCompose(mine);
+        mine.editBefore = captureEdits(mine);
+        mine.marks.beginEdit(mine.card, mine.words);
         mine.editing = new Set();
         closeMenu(mine);
         getSelection()?.removeAllRanges();
@@ -372,8 +432,10 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         syncEditControls(mine);
     }
 
-    function finishEdit(mine) {
+    function finishEdit(mine, repaint = true) {
         if (!mine.editing) return;
+        const changed = mine.editing.size > 0;
+        const removed = mine.marks.finishEdit(mine.words);
         for (const part of mine.editing) {
             const draft = part.cloneNode(true);
             // 只在脱离页面的副本还原遮盖词，重建时按当前设置重新遮盖和测量。
@@ -385,14 +447,32 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
             mine.drafts.set(part.dataset.stcrCardEdit, draft);
         }
         mine.editing = null;
+        if (changed) {
+            pushEditHistory(mine.undo, mine.editBefore);
+            mine.redo = [];
+        }
+        mine.editBefore = null;
         getSelection()?.removeAllRanges();
+        if (repaint) compose(mine);
+        if (removed && repaint) toast(`已移除 ${removed} 条被删除或无法定位的划线，可撤销编辑恢复`);
+    }
+
+    function moveEditHistory(mine, undo) {
+        if (mine.editing || mine.exporting || mine.rebuilding) return;
+        const source = undo ? mine.undo : mine.redo, target = undo ? mine.redo : mine.undo;
+        if (!source.length) return;
+        pushEditHistory(target, captureEdits(mine));
+        restoreEdits(mine, source.pop());
         compose(mine);
     }
 
     async function resetEdits(mine) {
         if (mine.editing || mine.exporting || !mine.drafts.size) return;
-        if (!await confirm('恢复这张卡片的原文，并清除本次手动编辑？', '恢复原文') || st !== mine || mine.editing || mine.exporting) return;
+        if (!await confirm('恢复这张卡片的原文，并清除本次手动编辑和卡片划线？完成后可撤销。', '恢复原文') || st !== mine || mine.editing || mine.exporting) return;
+        pushEditHistory(mine.undo, captureEdits(mine));
+        mine.redo = [];
         mine.drafts.clear();
+        mine.marks.restore();
         compose(mine);
     }
 
@@ -409,15 +489,17 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     function syncEditControls(mine) {
         const { els } = mine;
         const editing = !!mine.editing, drafted = mine.drafts.size > 0;
-        els.editBtn.disabled = mine.exporting || mine.rebuilding || !els.rulesHost.hidden || !mine.card?.querySelector(EDIT_PART);
+        els.editBtn.disabled = !mine.loaded || mine.exporting || mine.rebuilding || !els.rulesHost.hidden || !mine.card?.querySelector(EDIT_PART);
+        els.undoBtn.disabled = editing || mine.exporting || mine.rebuilding || !mine.undo.length;
+        els.redoBtn.disabled = editing || mine.exporting || mine.rebuilding || !mine.redo.length;
         els.editBtn.textContent = editing ? '完成编辑' : '编辑内容';
         els.side.inert = editing;
         els.studio.classList.toggle('stcr-studio--editing', editing);
-        els.editInfo.hidden = !editing && !drafted;
+        els.editInfo.hidden = !editing && !drafted && !mine.undo.length && !mine.redo.length;
         els.resetEdit.hidden = editing;
-        els.resetEdit.disabled = mine.exporting;
+        els.resetEdit.disabled = mine.exporting || !drafted;
         els.editHint.textContent = editing ? '点卡片里的文字即可修改。完成后会重新套用屏蔽词。'
-            : '已保留本次编辑。若要改名字替换规则，请先恢复原文。';
+            : '编辑已保留为会话草稿，可撤销或重做。重开同组选段可恢复，刷新页面后清空。改名字替换规则前请恢复原文。';
         els.autoNames.input.disabled = drafted;
         els.myRules.input.disabled = drafted;
         els.rulesBtn.disabled = drafted;
@@ -437,6 +519,8 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     async function rebuild(mine) {
         const current = ++mine.token;
         const { source } = mine;
+        // 名字替换变化后，旧历史里的副本文字不能再套到新规则上。
+        mine.undo = []; mine.redo = [];
         mine.rebuilding = true;
         syncEditControls(mine);
         setStatus(mine, mine.card ? '' : '正在生成预览…');
@@ -467,7 +551,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
 
     /** 按当前选项拼卡片、上遮盖、放进预览。同步完成，切模板/开关时立刻看到。 */
     function compose(mine) {
-        if (mine.editing) return;
+        if (mine.editing || !mine.loaded) return;
         const { els, prefs } = mine;
         const tpl = template(mine);
         const size = CARD_SIZES[prefs.size];
@@ -522,7 +606,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         mine.marks.paint(mine.card, mine.words);
         els.hover.hidden = true;
         closeMenu(mine);
-        els.exportBtn.disabled = empty || mine.exporting;
+        els.exportBtn.disabled = empty || mine.exporting || !mine.loaded;
         syncEditControls(mine);
         if (empty) setStatus(mine, mine.pieces.some(p => p.reasoning) ? '选中的文字在思维链里：打开右边"包含思维链"就能看到。' : '这段选区里没有可以放进卡片的文字。');
         else if (!els.status.classList.contains('stcr-studio-status--error')) setStatus(mine, '');
@@ -624,22 +708,18 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const words = [...new Set([...mine.permanent, ...mine.temp])].sort((a, b) => b.length - a.length);
         mine.words = words;
         mine.style = style;
-        let out = card;
-        words.forEach((word, i) => {
-            const own = styleFor(mine, word, colors);
-            // wrapMaskSpans 在"已挂在页面上的"输入上量宽度、返回新副本：换进页面，下一个词才量得到（I026）
-            const next = wrapMaskSpans(out, [word], own, mine.assetMap);
-            if (out.isConnected) out.replaceWith(next);
-            out = next;
-            for (const span of out.querySelectorAll('.stcr-mask:not([data-stcr-tw])')) {
-                span.dataset.stcrTw = String(i);
-                // 小图案：core 画图标时字体名没加引号会画成小点（06 I018），这里自己画好换成图片；导出原样复制图片。
-                for (const icon of span.querySelectorAll('[data-stcr-icon]')) {
-                    const src = iconImage(icon.dataset.stcrIcon, own.color);
-                    if (src) icon.replaceWith(h('img', { src, alt: '', class: 'stcr-mask-icon' }));
-                }
+        if (!words.length) return card;
+        const styles = new Map(words.map(word => [word, styleFor(mine, word, colors)]));
+        // 整张卡只复制一次，统一匹配长词，再按词各自的设置生成遮盖。
+        const out = wrapMaskSpans(card, words, style, mine.assetMap, styles);
+        if (card.isConnected) card.replaceWith(out);
+        for (const span of out.querySelectorAll('.stcr-mask[data-stcr-tw]')) {
+            const own = styles.get(words[Number(span.dataset.stcrTw)]);
+            for (const icon of span.querySelectorAll('[data-stcr-icon]')) {
+                const src = iconImage(icon.dataset.stcrIcon, own.color);
+                if (src) icon.replaceWith(h('img', { src, alt: '', class: 'stcr-mask-icon' }));
             }
-        });
+        }
         return out;
     }
 
@@ -739,6 +819,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const tpl = template(mine);
         for (const b of els.tpl.children) b.classList.toggle('stcr-on', b.dataset.tpl === tpl);
         for (const b of els.sizes.children) b.classList.toggle('stcr-on', b.dataset.size === prefs.size);
+        for (const b of els.quality.children) b.classList.toggle('stcr-on', Number(b.dataset.quality) === mine.exportScale);
         for (const b of els.masks.children) b.classList.toggle('stcr-on', b.dataset.mask === prefs.mask);
         for (const b of els.accent.children) b.classList.toggle('stcr-on', b.dataset.accent === prefs.digestAccent);
         els.icons.hidden = prefs.mask !== 'sticker';
@@ -1019,7 +1100,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     // ───────────── 屏蔽词 ─────────────
 
     async function addPermanent(mine, word) {
-        if (st !== mine || mine.exporting || !word) return false;
+        if (st !== mine || !mine.loaded || mine.exporting || !word) return false;
         try {
             mine.permanent = await store.maskWords.add(word);
             if (st !== mine) return false;
@@ -1183,9 +1264,13 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
 
     async function doExport(mine) {
         const { els } = mine;
-        if (mine.exporting || mine.rebuilding || !mine.card || els.exportBtn.disabled) return;
+        if (!mine.loaded || mine.exporting || mine.rebuilding || !mine.card || els.exportBtn.disabled) return;
+        flushCompose(mine);
         if (mine.editing) finishEdit(mine);
         mine.exporting = true;
+        const controller = new AbortController();
+        mine.exportController = controller;
+        const { signal } = controller;
         syncEditControls(mine);
         els.studio.classList.add('stcr-studio--busy');
         els.exportBtn.disabled = true;
@@ -1197,34 +1282,51 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         const warnings = [];
         try {
             const size = CARD_SIZES[mine.prefs.size];
-            await Promise.all([...mine.card.querySelectorAll('img')].map(img => img.decode().catch(() => {})));
+            setStatus(mine, '正在准备卡片图片…');
+            await waitForExport(Promise.all([...mine.card.querySelectorAll('img')].map(img => img.decode().catch(() => {}))),
+                { signal, message: '预览图片加载超时，请稍后重试' });
             if (st !== mine) return;
             // 片段已在 createCardMessage 副本上替换过名字，且不再绑定原文：replaceNames:false 只是"导出时不再做名字阶段"（03 §5.9）。
             const blob = await exportCard(mine.card, {
                 replaceNames: false, rules: [], assets: mine.assets, maskWords: mine.words, maskStyle: mine.style,
-                width: size.width, scale: 2, onWarning: message => warnings.push(message),
+                width: size.width, scale: mine.exportScale, signal, onWarning: message => warnings.push(message),
+                onProgress: progress => {
+                    if (st !== mine || signal.aborted) return;
+                    const label = typeof progress === 'string' ? progress : progress.label;
+                    setStatus(mine, `${label ?? '正在生成图片'}…`);
+                },
             });
             if (st !== mine) return;
             const url = URL.createObjectURL(blob);
+            const oldUrls = mine.urls.splice(0);
+            for (const old of oldUrls) URL.revokeObjectURL(old);
             mine.urls.push(url);
             const name = cardFileName();
             const link = h('a', { href: url, download: name, class: 'stcr-offscreen' });
             els.studio.append(link);
             link.click();
             link.remove();
+            // 浏览器接管下载后及时释放；不会在反复导出时累积整张 PNG。
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+                mine.urls = mine.urls.filter(item => item !== url);
+            }, 30_000);
             toast(`已导出：${name}（在浏览器的下载文件夹里）`);
             mine.lastWarnings = warnings;
             if (warnings.length) showNote(mine, `提示：${warnings.join(' ')}`);
         } catch (error) {
             if (st !== mine) return;
+            if (signal.aborted || error.name === 'AbortError') { showNote(mine, '已取消导出，卡片草稿仍保留。'); return; }
             console.error('[st-reader] 卡片导出失败：', error);
             showNote(mine, `导出失败：${error.message ?? error}。预览保留着，可以改一改再试。`, 'error');
         } finally {
             if (st === mine) {
                 mine.exporting = false;
+                mine.exportController = null;
+                setStatus(mine, '');
                 syncEditControls(mine);
                 els.studio.classList.remove('stcr-studio--busy');
-                els.exportBtn.disabled = !mine.card?.querySelector('.stcr-card-chat')?.childElementCount;
+                els.exportBtn.disabled = !mine.loaded || !mine.card?.querySelector('.stcr-card-chat')?.childElementCount;
                 els.exportBtn.querySelector('i').className = 'fa-solid fa-download';
                 els.exportBtn.querySelector('.stcr-studio-export-label').textContent = '导出 PNG';
             }
@@ -1237,10 +1339,19 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
     function close() {
         const mine = st;
         if (!mine) return;
+        mine.exportController?.abort();
+        if (mine.editing) finishEdit(mine, false);
+        if (mine.loaded) {
+            try {
+                mine.draftKey = cardDraftKey(mine.source, mine.rules, mine.assets);
+                draftCache.save(mine.draftKey, mine);
+            } catch (error) { console.warn('[st-reader] 本次会话草稿未保留：', error); }
+        }
         st = null;
         mine.token++;
         clearTimeout(mine.saveTimer);
         clearTimeout(mine.selectionTimer);
+        clearTimeout(mine.composeTimer);
         document.removeEventListener('selectionchange', mine.selectionListener);
         if (mine.saveTimer) store.settings.set(PREFS_KEY, { ...mine.prefs }).catch(() => {});
         mine.resize?.disconnect();
@@ -1250,6 +1361,7 @@ export function createCardStudio({ root, toast, confirm, getDirection, onClose }
         mine.pieces = [];
         mine.cache.cards.clear();
         mine.cache.texts.clear();
+        mine.drafts.clear(); mine.undo = []; mine.redo = []; mine.editBefore = null;
         // 下载已经交给浏览器；稍等再收回地址，免得个别浏览器还没开始读。
         const urls = mine.urls;
         setTimeout(() => urls.forEach(url => URL.revokeObjectURL(url)), 1000);

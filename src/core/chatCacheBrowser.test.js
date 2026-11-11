@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
 // 只在开发实例加载；以真实同源请求计时；首屏绘制与 D34 后台校验分开记录。
-import { createChatSource, makeChatKey, clearChatCache, getChatCacheStats, getCurrentChatKey, matchesHostChat } from './chatSource.js';
+import { createChatSource, makeChatKey, clearChatCache, getChatCacheStats, getCurrentChatKey, matchesHostChat } from './chatSource.js?v=0.3.1-self.5';
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -68,8 +68,8 @@ export async function testChatCacheBrowser({ performanceCheck = false } = {}) {
         check('主动清空与新实例均为空（真实刷新另由开发脚本验证）', source.getChatCacheStats().entries === 0 && createChatSource().getChatCacheStats().entries === 0);
 
         if (performanceCheck) {
-            const { openReader, closeReader, isReaderOpen } = await import('../ui/reader.js');
-            const { getPrefs, setPrefs, loadPrefs } = await import('../ui/prefs.js');
+            const { openReader, closeReader, isReaderOpen } = await import('../ui/reader.js?v=0.3.1-self.5');
+            const { getPrefs, setPrefs, loadPrefs } = await import('../ui/prefs.js?v=0.3.1-self.5');
             assert(!isReaderOpen(), '请先关闭阅读器再计时'); await loadPrefs();
             const prefs = { ...getPrefs() }, originalFetch = window.fetch, validationWork = [];
             let iteration = 0;

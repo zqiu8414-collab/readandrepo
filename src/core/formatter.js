@@ -1,8 +1,8 @@
 // ST Reader — AGPL-3.0
-import { loadHostRuntime } from './hostRuntime.js';
-import { collectScripts, PLACEMENT, runDisplayRegex, substituteNames } from './regexPipeline.js';
-import { isDevInstance } from './readonlyGuard.js';
-import { cssDeclarations } from './cssDeclarations.js';
+import { loadHostRuntime } from './hostRuntime.js?v=0.3.1-self.5';
+import { collectScripts, PLACEMENT, runDisplayRegex, substituteNames } from './regexPipeline.js?v=0.3.1-self.5';
+import { isDevInstance } from './readonlyGuard.js?v=0.3.1-self.5';
+import { cssDeclarations } from './cssDeclarations.js?v=0.3.1-self.5';
 
 let runtime;
 let markdown;

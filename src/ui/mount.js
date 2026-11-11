@@ -1,7 +1,7 @@
 // ST Reader — AGPL-3.0
 // 两个入口：魔杖菜单「阅读器」、斜杠命令 /reader。
 
-import { openReader } from './reader.js?v=0.3.1-self.4';
+import { openReader } from './reader.js?v=0.3.1-self.5';
 
 const TABS = { recent: 'recent', owners: 'owners', characters: 'owners', favorites: 'favorites', current: 'current' };
 

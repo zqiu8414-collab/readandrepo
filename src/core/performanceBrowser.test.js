@@ -1,8 +1,8 @@
 // ST Reader — AGPL-3.0
 // 仅由 localhost:8100 的 stcrSelfTest({performance:true}) 动态加载。
-import { openReader, closeReader, isReaderOpen } from '../ui/reader.js';
-import { getPrefs, setPrefs, loadPrefs, setReadPosition } from '../ui/prefs.js';
-import { makeChatKey, clearChatCache } from './chatSource.js';
+import { openReader, closeReader, isReaderOpen } from '../ui/reader.js?v=0.3.1-self.5';
+import { getPrefs, setPrefs, loadPrefs, setReadPosition } from '../ui/prefs.js?v=0.3.1-self.5';
+import { makeChatKey, clearChatCache } from './chatSource.js?v=0.3.1-self.5';
 
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 // rAF 后的任务排在本帧绘制之后；双 rAF 会额外计入一个无关刷新周期。

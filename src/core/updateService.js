@@ -1,6 +1,7 @@
 // ST Reader — AGPL-3.0
-import { store } from './store.js';
-import { hostBackedSettings } from './hostSettings.js';
+import { store } from './store.js?v=0.3.1-self.5';
+import { hostBackedSettings } from './hostSettings.js?v=0.3.1-self.5';
+import { RELEASE_VERSION } from './releaseVersion.js?v=0.3.1-self.5';
 
 // 自用分支只检查、更新 readandrepo 安装，保留原阅读器的数据存储键。
 const EXTENSION_NAME = 'readandrepo';
@@ -51,7 +52,7 @@ function httpError(status, updating) {
 /** 工厂仅用于隔离测试；正式 UI 使用下方单例导出。目录名与 API 均不可由调用者指定。 */
 export function createUpdateService({ fetchImpl = (...args) => globalThis.fetch(...args),
     getContext = () => globalThis.SillyTavern?.getContext(), settings = hostBackedSettings(store.settings),
-    rootUrl = DEFAULT_ROOT, origin = globalThis.location?.origin } = {}) {
+    rootUrl = DEFAULT_ROOT, origin = globalThis.location?.origin, runningVersion = null } = {}) {
     let checking = null, updating = null;
     function resource(name) {
         const root = new URL(rootUrl);
@@ -142,7 +143,7 @@ export function createUpdateService({ fetchImpl = (...args) => globalThis.fetch(
         return updating;
     }
     return {
-        async getVersion() { return (await manifest()).version; }, checkUpdate, runUpdate,
+        async getVersion() { return runningVersion ?? (await manifest()).version; }, checkUpdate, runUpdate,
         async getChangelog() { return parseChangelog(await (await readFile('CHANGELOG.md')).text()); },
         async getLastSeenVersion() { const value = await settings.get('lastSeenVersion', null); return typeof value === 'string' && VERSION.test(value) ? value : null; },
         async markVersionSeen(version) {
@@ -152,5 +153,5 @@ export function createUpdateService({ fetchImpl = (...args) => globalThis.fetch(
     };
 }
 
-export const updateService = createUpdateService();
+export const updateService = createUpdateService({ runningVersion: RELEASE_VERSION });
 export const { getVersion, checkUpdate, runUpdate, getChangelog, getLastSeenVersion, markVersionSeen } = updateService;

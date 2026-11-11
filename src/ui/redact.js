@@ -11,10 +11,10 @@
 // 替换规则走 core 的 replaceNamesInRaw（我的规则 + 全局"自动名字"开着时的 char/user，T81/D38）；屏蔽词走 core 的 maskText。
 // 替换出来的字不再被屏蔽（与卡片相同：替换优先于屏蔽，03 §5.10）。匹配限于单个文本节点内，不跨标签。
 
-import { automaticNameRules, maskCodeText, maskText, replaceNamesInRaw, ruleWords } from '../core/cardExport.js';
-import { parseChatKey } from '../core/chatSource.js';
-import { readableOn } from './colorPicker.js';
-import { h } from './dom.js';
+import { automaticNameRules, maskCodeText, maskText, replaceNamesInRaw, ruleWords } from '../core/cardExport.js?v=0.3.1-self.5';
+import { parseChatKey } from '../core/chatSource.js?v=0.3.1-self.5';
+import { readableOn } from './colorPicker.js?v=0.3.1-self.5';
+import { h } from './dom.js?v=0.3.1-self.5';
 
 const SKIP = 'style, script, button, [data-stcr-ignore-anchor], .stcr-rd-orig';
 const MACRO = /{{\s*(user|char)\s*}}/i; // replaceNamesInRaw 会展开这两个宏、改变长度；带宏的文本节点只做屏蔽

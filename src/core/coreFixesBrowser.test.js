@@ -1,8 +1,8 @@
 // ST Reader — AGPL-3.0
-import { foreignExtensionSettings } from './hostSettings.js';
-import { wrapMaskSpans, exportCard, createCardMessage } from './cardExport.js';
-import { maskHtmlString } from './codeTransforms.js';
-import { createStore } from './store.js';
+import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.5';
+import { wrapMaskSpans, exportCard, createCardMessage } from './cardExport.js?v=0.3.1-self.5';
+import { maskHtmlString } from './codeTransforms.js?v=0.3.1-self.5';
+import { createStore } from './store.js?v=0.3.1-self.5';
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const cleanOptions = { rules: [], assets: [], maskWords: [], replaceNames: false, scale: 1 };

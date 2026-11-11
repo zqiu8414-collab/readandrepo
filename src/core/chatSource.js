@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
-import { calculateDepths, freezeJson, normalizeDate, parseChatRows, toMessageModel } from './messageModel.js';
-import { createMemoryChatCache, estimateJsonBytes } from './chatCache.js';
+import { calculateDepths, freezeJson, normalizeDate, parseChatRows, toMessageModel } from './messageModel.js?v=0.3.1-self.5';
+import { createMemoryChatCache, estimateJsonBytes } from './chatCache.js?v=0.3.1-self.5';
 
 export class StcrDataError extends Error {
     constructor(code, message) { super(message); this.name = 'StcrDataError'; this.code = code; }

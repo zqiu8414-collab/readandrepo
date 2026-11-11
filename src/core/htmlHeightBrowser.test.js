@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
-import { foreignExtensionSettings } from './hostSettings.js';
-import { createSandbox } from './htmlRenderer.js';
+import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.5';
+import { createSandbox } from './htmlRenderer.js?v=0.3.1-self.5';
 import { SCENE_HTML } from '../../dev/fixtures/html.mjs';
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));

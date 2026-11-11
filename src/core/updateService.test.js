@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
-import { createUpdateService, parseChangelog } from './updateService.js';
-import { createStore } from './store.js';
+import { createUpdateService, parseChangelog } from './updateService.js?v=0.3.1-self.5';
+import { createStore } from './store.js?v=0.3.1-self.5';
 
 const assert = (value, message = 'T54a 断言失败') => { if (!value) throw new Error(message); };
 const equal = (a, b) => assert(JSON.stringify(a) === JSON.stringify(b), `${JSON.stringify(a)} ≠ ${JSON.stringify(b)}`);

@@ -2,7 +2,7 @@
 // 收藏整个聊天（T43、F13、D19）：存 store.bookmarks 的 kind:'chat'（03 §5.12）。抽屉"收藏"页、聊天列表的 ☆、阅读器顶栏的 ☆ 共用。
 // 楼 / 候选的收藏（kind floor/swipe）只在右侧批注面板里，这里不碰。只读（D02）：只写扩展自己的存储。
 
-import { store, bookmarkId } from '../core/store.js';
+import { store, bookmarkId } from '../core/store.js?v=0.3.1-self.5';
 
 let keys = null; // 已收藏的 chatKey 集合；null = 还没读
 const listeners = new Set();

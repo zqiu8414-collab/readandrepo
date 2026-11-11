@@ -1,8 +1,9 @@
 // ST Reader — AGPL-3.0
-import { CARD_ICONS } from './cardTransforms.js';
-import { rasterizeCardIcon } from './cardFonts.js';
-import { createResourceLoader } from './htmlExternalResources.js';
-import { cssDeclarations } from './cssDeclarations.js';
+import { CARD_ICONS } from './cardTransforms.js?v=0.3.1-self.5';
+import { rasterizeCardIcon } from './cardFonts.js?v=0.3.1-self.5';
+import { createResourceLoader } from './htmlExternalResources.js?v=0.3.1-self.5';
+import { cssDeclarations } from './cssDeclarations.js?v=0.3.1-self.5';
+import { checkCardDimensions, waitForExport } from './exportControl.js?v=0.3.1-self.5';
 
 const forbiddenTags = new Set(['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'BASE', 'META', 'FORM', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'AUDIO', 'VIDEO', 'SOURCE']);
 // T73：url() 不再整条丢弃——副本 CSP 只放行 data:，排版时不联网；最后由 embedCardImages 把卡片上真正用到的图片内嵌或换成占位。
@@ -76,7 +77,8 @@ function copyAttributes(source, target) {
 }
 
 /** 在禁网、禁脚本的 srcdoc 中排版副本。宿主 DOM 不插入任何聊天/名字/样式副本。 */
-export async function createCardSnapshot(root, fontCss, { width } = {}) {
+export async function createCardSnapshot(root, fontCss, { width, signal } = {}) {
+    signal?.throwIfAborted();
     if (!root?.isConnected || root.ownerDocument !== document) throw new TypeError('请先把卡片预览放到当前页面，再导出');
     const rect = root.getBoundingClientRect();
     width ??= rect.width;
@@ -84,15 +86,15 @@ export async function createCardSnapshot(root, fontCss, { width } = {}) {
     const frame = document.createElement('iframe');
     frame.dataset.stcrExportFrame = '1'; frame.setAttribute('aria-hidden', 'true'); frame.setAttribute('sandbox', 'allow-same-origin');
     frame.style.cssText = `position:fixed;left:-30000px;top:0;width:${Math.ceil(width)}px;height:2000px;border:0;pointer-events:none;`;
-    let loadTimer;
     const loaded = new Promise((resolve, reject) => {
-        loadTimer = setTimeout(() => reject(new Error('隔离导出文档加载超时')), 10000);
         frame.onload = resolve; frame.onerror = () => reject(new Error('无法建立隔离导出文档'));
     });
     frame.srcdoc = '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; frame-src \'self\';"><body></body>';
     document.body.append(frame);
     try {
-        await loaded; clearTimeout(loadTimer);
+        await waitForExport(loaded, { signal, timeout: 10000, message: '隔离导出文档加载超时' });
+        frame.onload = frame.onerror = null;
+        signal?.throwIfAborted();
         const doc = frame.contentDocument, nodeMap = new Map();
         doc.documentElement.className = document.documentElement.className; doc.body.className = document.body.className;
         const style = doc.createElement('style');
@@ -152,7 +154,7 @@ export async function createCardSnapshot(root, fontCss, { width } = {}) {
             message.style.setProperty('contain-intrinsic-size', 'none', 'important');
         }
         return { frame, doc, copy, nodeMap, width, destroy: () => frame.remove() };
-    } catch (error) { clearTimeout(loadTimer); frame.remove(); throw error; }
+    } catch (error) { frame.onload = frame.onerror = null; frame.remove(); throw error; }
 }
 
 /**
@@ -160,7 +162,8 @@ export async function createCardSnapshot(root, fontCss, { width } = {}) {
  * 拿不到的换成斜纹占位并逐项提示，其余美化照常导出。完成后副本里不再有非 data: 的 url()，截图库不会尝试联网。
  * @returns {Promise<{embedded:number, failed:number}>}
  */
-export async function embedCardImages(snapshot, { onWarning, fetchFn, signal } = {}) {
+export async function embedCardImages(snapshot, { onWarning, fetchFn, signal, onProgress } = {}) {
+    signal?.throwIfAborted();
     const { copy, doc } = snapshot, view = doc.defaultView;
     const loader = createResourceLoader({ baseUrl: document.baseURI, signal, onWarning: message => onWarning?.(message), ...(fetchFn ? { fetchFn } : {}) });
     const pseudoRules = [];
@@ -170,7 +173,11 @@ export async function embedCardImages(snapshot, { onWarning, fetchFn, signal } =
         for (const match of value.matchAll(CSS_URL)) {
             out += value.slice(last, match.index); last = match.index + match[0].length;
             const raw = (match[1] ?? match[2] ?? match[3] ?? '').trim();
-            if (/^data:/i.test(raw)) { out += match[0]; continue; }
+            if (/^(?:data:|#)/i.test(raw)) { out += match[0]; continue; }
+            // 内联 SVG 的 mask/use 引用可能被计算样式展开为 about:srcdoc#id，仍属于本图。
+            if (raw.startsWith('about:srcdoc#') && doc.getElementById(raw.slice('about:srcdoc#'.length))) {
+                out += `url("#${raw.slice('about:srcdoc#'.length)}")`; continue;
+            }
             try {
                 const loaded = await loader.resource(raw, document.baseURI, 'image');
                 if (!/^data:image\//i.test(loaded.data)) throw new Error('不是图片');
@@ -183,6 +190,8 @@ export async function embedCardImages(snapshot, { onWarning, fetchFn, signal } =
         }
         return out + value.slice(last);
     }
+    // 先读取样式再下载/写回，避免每拿到一张图就重新测整张卡；并发最多四项。
+    const jobs = [];
     for (const element of [copy, ...copy.querySelectorAll('*')]) {
         for (const pseudo of [null, '::before', '::after']) {
             const style = view.getComputedStyle(element, pseudo);
@@ -190,32 +199,50 @@ export async function embedCardImages(snapshot, { onWarning, fetchFn, signal } =
                 if (name === 'content' && !pseudo) continue;
                 const value = style.getPropertyValue(name);
                 if (!/url\(/i.test(value) || [...value.matchAll(CSS_URL)].every(match => /^data:/i.test((match[1] ?? match[2] ?? match[3] ?? '').trim()))) continue;
-                const next = await resolve(value);
-                if (!pseudo) { element.style.setProperty(name, next, 'important'); continue; }
+                jobs.push({ element, pseudo, name, value });
+            }
+        }
+    }
+    let nextJob = 0, completed = 0;
+    const progress = () => onProgress?.({ stage: 'resources', label: `正在准备图片 ${completed}/${jobs.length}`, current: completed, total: jobs.length });
+    progress();
+    async function worker() {
+        while (nextJob < jobs.length) {
+            signal?.throwIfAborted();
+            const { element, pseudo, name, value } = jobs[nextJob++];
+            const next = await resolve(value);
+            signal?.throwIfAborted();
+            if (!pseudo) element.style.setProperty(name, next, 'important');
+            else {
                 const marker = `stcr-card-res-${++serial}`;
                 element.classList.add(marker);
                 pseudoRules.push(`.${marker}${pseudo}{${name}:${next}!important}`);
             }
+            completed++; progress();
         }
     }
+    await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, worker));
     if (pseudoRules.length) { const style = doc.createElement('style'); style.textContent = pseudoRules.join('\n'); doc.head.append(style); }
     return { embedded, failed };
 }
 
 /** 先触发布局，再等待副本内嵌字体解码，让遮盖测量与截图使用同一字形。 */
-export async function waitForCardFonts({ copy, doc }) {
+export async function waitForCardFonts({ copy, doc }, { signal } = {}) {
+    signal?.throwIfAborted();
     copy.getBoundingClientRect();
-    let fontTimer;
-    try {
-        await Promise.race([
-            Promise.all([...doc.fonts].map(face => face.load())).then(() => doc.fonts.ready),
-            new Promise((_, reject) => { fontTimer = setTimeout(() => reject(new Error('本地字体解码超时')), 15000); }),
-        ]);
-    } finally { clearTimeout(fontTimer); }
+    await waitForExport(Promise.all([...doc.fonts].map(face => face.load())).then(() => doc.fonts.ready), { signal, message: '本地字体解码超时' });
+}
+
+/** 字体与遮盖排版后即可预检，避免已经超限的卡片继续下载全部背景图。 */
+export function measureCardSnapshot(snapshot, scale = 2) {
+    const rect = snapshot.copy.getBoundingClientRect();
+    snapshot.height = Math.ceil(Math.max(rect.height, snapshot.copy.scrollHeight));
+    checkCardDimensions(snapshot.width, snapshot.height, scale);
 }
 
 /** 在副本内去掉源属性、转换图标，并等待最终布局。 */
-export async function finishCardSnapshot(snapshot) {
+export async function finishCardSnapshot(snapshot, { signal, scale = 2 } = {}) {
+    signal?.throwIfAborted();
     const { copy, doc } = snapshot;
     for (const element of [copy, ...copy.querySelectorAll('*')]) {
         for (const name of element.getAttributeNames()) if (/^(title|aria-|data-|alt|value)/.test(name) && !['data-stcr-icon', 'data-stcr-mask', 'data-stcr-protected', 'data-stcr-css'].includes(name)) element.removeAttribute(name);
@@ -227,11 +254,9 @@ export async function finishCardSnapshot(snapshot) {
         image.style.cssText = 'width:1em!important;height:1em!important;display:inline-block!important;vertical-align:-.1em!important;';
         icon.replaceWith(image);
     }
-    await waitForCardFonts(snapshot);
-    await Promise.all([...copy.querySelectorAll('img')].map(image => image.decode()));
+    await waitForCardFonts(snapshot, { signal });
+    await waitForExport(Promise.all([...copy.querySelectorAll('img')].map(image => image.decode())), { signal, message: '卡片图片解码超时' });
     // 图片解码与字体就绪后再次布局，避免截断最后一行。
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const rect = copy.getBoundingClientRect();
-    snapshot.height = Math.ceil(Math.max(rect.height, copy.scrollHeight));
-    if (!snapshot.height || snapshot.height > 16384) throw new RangeError('卡片高度须在 1–16384 像素内，请减少选段');
+    await waitForExport(new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))), { signal, message: '卡片排版等待超时，请回到当前页面重试' });
+    measureCardSnapshot(snapshot, scale);
 }

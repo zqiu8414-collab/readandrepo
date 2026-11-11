@@ -262,11 +262,12 @@ export function pruneProgress(table, max = 300) {
 
 // ───────────────────────── 分享卡片（T23a）的纯逻辑 ─────────────────────────
 
-/** 三档尺寸（02 §6.2）。width/minHeight 是 CSS 像素，导出时 ×2，得到 1080×1350 / 1080×1080 / 1600×900 起。 */
+/** width/minHeight 是 CSS 像素，导出默认 ×2；高度随正文增长。 */
 export const CARD_SIZES = Object.freeze({
     portrait: Object.freeze({ width: 540, minHeight: 675, label: '竖版' }),
     square: Object.freeze({ width: 540, minHeight: 540, label: '方形' }),
     wide: Object.freeze({ width: 800, minHeight: 450, label: '宽版' }),
+    ultrawide: Object.freeze({ width: 1200, minHeight: 675, label: '超宽版' }),
 });
 export const CARD_TEMPLATES = Object.freeze(['theme', 'paper', 'dark', 'digest']);
 export const CARD_MASKS = Object.freeze(['bar', 'block', 'sticker']);
@@ -336,6 +337,20 @@ export function cardFileName(date = new Date()) {
  * @returns {{a0:number,a1:number,b0:number,b1:number,equal:boolean}[]}
  */
 export function alignTexts(a, b, { window = 8, reach = 96 } = {}) {
+    // 先取掉公共尾部，长替换也不会把后面成千上万字误判成同一个替换词。
+    let suffix = 0;
+    while (suffix < a.length && suffix < b.length && a[a.length - suffix - 1] === b[b.length - suffix - 1]) suffix++;
+    const aEnd = a.length - suffix, bEnd = b.length - suffix;
+    const segments = alignTextMiddle(a.slice(0, aEnd), b.slice(0, bEnd), window, reach);
+    if (suffix) {
+        const last = segments.at(-1);
+        if (last?.equal && last.a1 === aEnd && last.b1 === bEnd) { last.a1 = a.length; last.b1 = b.length; }
+        else segments.push({ a0: aEnd, a1: a.length, b0: bEnd, b1: b.length, equal: true });
+    }
+    return segments;
+}
+
+function alignTextMiddle(a, b, window, reach) {
     const segments = [];
     let i = 0, j = 0;
     const synced = (ai, bj) => {
@@ -366,7 +381,9 @@ export function alignTexts(a, b, { window = 8, reach = 96 } = {}) {
 function refineDiff(a, b, a0, a1, b0, b1) {
     const n = a1 - a0, m = b1 - b0;
     const whole = [{ a0, a1, b0, b1, equal: false }];
-    if (!n || !m || n * m > 250000) return whole;
+    if (!n || !m) return whole;
+    // 工作量封顶，但不把无法证明的映射当作合法选段扩张。
+    if (n * m > 250000) return [{ ...whole[0], uncertain: true }];
     const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
     for (let x = n - 1; x >= 0; x--) for (let y = m - 1; y >= 0; y--) {
         dp[x][y] = a[a0 + x] === b[b0 + y] ? dp[x + 1][y + 1] + 1 : Math.max(dp[x + 1][y], dp[x][y + 1]);
@@ -400,6 +417,7 @@ export function mapOffset(segments, x, edge = 'start') {
     for (const s of segments) {
         const inside = edge === 'start' ? x >= s.a0 && x < s.a1 : x > s.a0 && x <= s.a1;
         if (!inside) continue;
+        if (s.uncertain) throw new RangeError('这段文字的替换前后位置无法准确对应，请缩小选段，或暂时关闭卡片里的名字替换后重试');
         if (s.equal) return s.b0 + (x - s.a0);
         return edge === 'start' ? s.b0 : s.b1;
     }

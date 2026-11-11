@@ -1671,3 +1671,25 @@
 #stcr_root .stcr-sel-pop--collect { flex-wrap: wrap; max-width: calc(100% - 16px); border-radius: 16px; }
 #stcr_root .stcr-card-excerpt { display: block; }
 #stcr_root .stcr-card-excerpt + .stcr-card-excerpt { margin-top: .75em; }
+
+/* readandrepo：逐段检查与删除；列表占用自己的空间，不盖住正文。 */
+#stcr_root .stcr-collection-list {
+    flex-basis: 100%; min-width: 0; width: 100%;
+    max-height: min(30vh, 240px); overflow-y: auto; overscroll-behavior: contain;
+    border-top: 1px solid var(--stcr-border); padding-top: 6px;
+}
+#stcr_root .stcr-collection-item {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start;
+    gap: 4px 10px; padding: 8px 4px; border-bottom: 1px solid var(--stcr-border);
+}
+#stcr_root .stcr-collection-item:last-child { border-bottom: 0; }
+#stcr_root .stcr-collection-label { grid-column: 1; font-size: 12px; color: var(--stcr-faint); }
+#stcr_root .stcr-collection-preview {
+    grid-column: 1; grid-row: 2;
+    display: block; margin-top: 3px; white-space: pre-wrap; overflow-wrap: anywhere;
+    font-size: 13px; line-height: 1.5; color: var(--stcr-text);
+}
+#stcr_root .stcr-collection-item > button { grid-column: 2; grid-row: 1 / span 2; flex: none; }
+#stcr_root .stcr-studio-seg { flex-wrap: wrap; }
+#stcr_root .stcr-studio { grid-template-rows: minmax(52px, auto) minmax(0, 1fr); }
+#stcr_root .stcr-studio-head { flex-wrap: wrap; padding-block: 6px; }

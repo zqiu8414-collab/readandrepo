@@ -1,12 +1,12 @@
 // ST Reader — AGPL-3.0
-import { maskHtmlString, transformHtmlOffline } from './codeTransforms.js';
-import { htmlWidth } from './htmlRenderer.js';
+import { maskHtmlString, transformHtmlOffline } from './codeTransforms.js?v=0.3.1-self.5';
+import { htmlWidth } from './htmlRenderer.js?v=0.3.1-self.5';
 import { domToBlob } from '../../vendor/modern-screenshot.mjs';
-import { offlineCaptureGuard } from './offlineCapture.js';
-import { removeNetworkResources } from './htmlResources.js';
-import { captureScale, captureGeometry } from './htmlCrop.js';
-import { embedHtmlResources } from './htmlExternalResources.js';
-import { restoreSnapshotScroll } from './htmlSnapshot.js';
+import { offlineCaptureGuard } from './offlineCapture.js?v=0.3.1-self.5';
+import { removeNetworkResources } from './htmlResources.js?v=0.3.1-self.5';
+import { captureScale, captureGeometry } from './htmlCrop.js?v=0.3.1-self.5';
+import { embedHtmlResources } from './htmlExternalResources.js?v=0.3.1-self.5';
+import { restoreSnapshotScroll } from './htmlSnapshot.js?v=0.3.1-self.5';
 
 const staticPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; base-uri 'none'; form-action 'none';";
 function sanitizeStatic(doc, keepResources = false) {

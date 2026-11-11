@@ -1,10 +1,10 @@
 // ST Reader — AGPL-3.0
 // T70 浏览器回归（只在 8100 开发实例）：真写 .dev 的 user/files/，清 IndexedDB 后刷新自动恢复。
 // 由 dev/test-performance.mjs --backup 分两段调用：write（刷新前）→ 清站点数据并刷新 → restored（刷新后）。
-import { isDevInstance } from './readonlyGuard.js';
-import { store } from './store.js';
-import { createTextAnchor } from './anchor.js';
-import { flushMirror, getMirrorStatus, MAIN_FILE, whenStarted } from './backupService.js';
+import { isDevInstance } from './readonlyGuard.js?v=0.3.1-self.5';
+import { store } from './store.js?v=0.3.1-self.5';
+import { createTextAnchor } from './anchor.js?v=0.3.1-self.5';
+import { flushMirror, getMirrorStatus, MAIN_FILE, whenStarted } from './backupService.js?v=0.3.1-self.5';
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const MARK = 'T70 自动备份回归（虚构，测完即删）';

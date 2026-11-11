@@ -11,8 +11,8 @@
 // 沙箱是贵的（每个一个 iframe）：离视口还有一屏远时才建，楼层被换掉 / 阅读器关掉就 destroy（core 要求）。
 // 外链（D16，2026-09-30 人类修订）：默认允许，Aa 里能整体关掉；每一块还能单独断网。截图始终断网（core 保证）。
 
-import { createSandbox, detectHtmlBlocks } from '../core/htmlRenderer.js';
-import { h, iconButton } from './dom.js';
+import { createSandbox, detectHtmlBlocks } from '../core/htmlRenderer.js?v=0.3.1-self.5';
+import { h, iconButton } from './dom.js?v=0.3.1-self.5';
 
 export const HTML_WIDTHS = Object.freeze([
     { id: 390, label: '手机', title: '手机宽度 390px' },

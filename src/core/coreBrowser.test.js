@@ -1,8 +1,8 @@
 // ST Reader — AGPL-3.0
-import { listCharacters, listGroups, listRecent, listByCharacter, listByGroup, getCurrentChatKey, makeChatKey, openChat } from './chatSource.js';
-import { cleanStyleText, initFormatter, formatWithStrategy, renderMessage } from './formatter.js';
-import { loadHostRuntime } from './hostRuntime.js';
-import { collectScripts, runDisplayRegex, PLACEMENT } from './regexPipeline.js';
+import { listCharacters, listGroups, listRecent, listByCharacter, listByGroup, getCurrentChatKey, makeChatKey, openChat } from './chatSource.js?v=0.3.1-self.5';
+import { cleanStyleText, initFormatter, formatWithStrategy, renderMessage } from './formatter.js?v=0.3.1-self.5';
+import { loadHostRuntime } from './hostRuntime.js?v=0.3.1-self.5';
+import { collectScripts, runDisplayRegex, PLACEMENT } from './regexPipeline.js?v=0.3.1-self.5';
 
 function assert(value, message) { if (!value) throw new Error(message); }
 function asElement(html) { const template = document.createElement('template'); template.innerHTML = html; return template.content; }

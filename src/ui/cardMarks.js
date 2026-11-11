@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
 // readandrepo 修改：2026-11-08，分享卡片内的临时划线。仅修改预览副本，不写聊天或阅读批注。
-import { locateTextQuote, makeTextQuote } from '../core/textTransforms.js';
+import { locateTextQuote, makeTextQuote } from '../core/textTransforms.js?v=0.3.1-self.5';
 
 const PART = '[data-stcr-card-part]';
 const SKIP = 'style, script, template, button, textarea, svg, [data-stcr-ignore-anchor]';
@@ -14,21 +14,27 @@ const PALETTE = {
 /** 遮盖按内存词表计算原长度；原词始终不写入 DOM、属性或导出图片。 */
 function textIndex(root, words) {
     let text = '';
-    const nodes = [];
+    const nodes = [], points = [];
     function visit(node) {
         if (node.nodeType === 3) {
-            nodes.push({ node, start: text.length, end: text.length + node.length });
+            const entry = { node, start: text.length, end: text.length + node.length };
+            nodes.push(entry); points.push(entry);
             text += node.data;
         } else if (node.nodeType === 1 || node.nodeType === 11) {
             if (node.nodeType === 1) {
                 if (node.matches(SKIP)) return;
-                if (node.matches('.stcr-mask')) { text += words[Number(node.dataset.stcrTw)] ?? ''; return; }
+                if (node.matches('.stcr-mask')) {
+                    const start = text.length;
+                    text += words[Number(node.dataset.stcrTw)] ?? '';
+                    points.push({ node, start, end: text.length, atomic: true });
+                    return;
+                }
             }
             for (const child of node.childNodes) visit(child);
         }
     }
     visit(root);
-    return { text, nodes };
+    return { text, nodes, points };
 }
 
 function containerFor(node) {
@@ -41,6 +47,62 @@ function containerFor(node) {
 export function createCardMarks() {
     const records = new Map();
     let serial = 0;
+    let editingRanges = null;
+
+    /** 编辑用浏览器会随输入移动的 Range；删除后绝不再到别处搜索同名文字。 */
+    function beginEdit(card, words = []) {
+        editingRanges = new Map();
+        for (const container of card.querySelectorAll(PART)) {
+            const { text, points } = textIndex(container, words);
+            for (const record of records.values()) {
+                if (record.part !== container.dataset.stcrCardPart) continue;
+                const at = record.text === text ? record : locateTextQuote(text, record.quote);
+                if (!at) continue;
+                const first = points.find(point => point.end > at.start);
+                const last = points.findLast(point => point.start < at.end);
+                if (!first || !last) continue;
+                const range = container.ownerDocument.createRange();
+                if (first.atomic) range.setStartBefore(first.node);
+                else range.setStart(first.node, Math.max(0, at.start - first.start));
+                if (last.atomic) range.setEndAfter(last.node);
+                else range.setEnd(last.node, Math.min(last.node.length, at.end - last.start));
+                const overlapping = [...records.values()].some(other => other.id !== record.id && other.part === record.part
+                    && other.text === text && other.start < at.end && other.end > at.start);
+                editingRanges.set(record.id, { container, range, useWrappers: !overlapping && !first.atomic && !last.atomic,
+                    startInset: first.atomic ? at.start - first.start : 0, endInset: last.atomic ? last.end - at.end : 0 });
+            }
+        }
+    }
+
+    function finishEdit(words = []) {
+        if (!editingRanges) return 0;
+        let removed = 0;
+        for (const [id, { container, range, useWrappers, startInset, endInset }] of editingRanges) {
+            const record = records.get(id);
+            if (!record) continue;
+            // 完整可见的划线优先沿用其内联节点：替换末字时包含新字，删除整条后节点不会跑到同名词。
+            const spans = useWrappers ? [...container.querySelectorAll('.stcr-card-highlight')]
+                .filter(span => span.dataset.stcrCardMark === id && textIndex(span, words).text.length) : [];
+            if (spans.length) {
+                range.setStartBefore(spans[0]);
+                range.setEndAfter(spans.at(-1));
+            }
+            if (range.collapsed || !container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+                records.delete(id); removed++; continue;
+            }
+            const prefix = container.ownerDocument.createRange();
+            prefix.selectNodeContents(container);
+            prefix.setEnd(range.startContainer, range.startOffset);
+            const start = textIndex(prefix.cloneContents(), words).text.length + startInset;
+            prefix.setEnd(range.endContainer, range.endOffset);
+            const end = textIndex(prefix.cloneContents(), words).text.length - endInset;
+            const { text } = textIndex(container, words);
+            if (end <= start) { records.delete(id); removed++; continue; }
+            Object.assign(record, { text, start, end, quote: makeTextQuote(text, start, end) });
+        }
+        editingRanges = null;
+        return removed;
+    }
 
     function capture(card, range, words = []) {
         if (!range || range.collapsed) return null;
@@ -108,7 +170,13 @@ export function createCardMarks() {
     }
 
     return {
-        capture, add, paint,
+        capture, add, paint, beginEdit, finishEdit,
+        snapshot: () => [...records.values()].map(record => ({ ...record, quote: { ...record.quote } })),
+        restore(snapshot = []) {
+            records.clear(); editingRanges = null;
+            for (const record of snapshot) records.set(record.id, { ...record, quote: { ...record.quote } });
+            serial = Math.max(0, ...snapshot.map(record => Number(record.id) || 0));
+        },
         get: id => records.get(id),
         update(id, color) { const record = records.get(id); if (record && Object.hasOwn(PALETTE, color)) record.color = color; },
         remove: id => records.delete(id),

@@ -3,11 +3,11 @@
 // 顶部"本聊天 / 全部聊天"切换（T22 验收意见）：全部聊天时按聊天分组，点一条直接打开那个聊天跳过去。
 // 没打开聊天时默认"全部聊天"。文字一律 textContent。
 
-import { parseChatKey } from '../core/chatSource.js';
-import { store } from '../core/store.js';
-import { copyText, h, iconButton } from './dom.js';
-import { COLORS } from './marks.js';
-import { redactString } from './redact.js';
+import { parseChatKey } from '../core/chatSource.js?v=0.3.1-self.5';
+import { store } from '../core/store.js?v=0.3.1-self.5';
+import { copyText, h, iconButton } from './dom.js?v=0.3.1-self.5';
+import { COLORS } from './marks.js?v=0.3.1-self.5';
+import { redactString } from './redact.js?v=0.3.1-self.5';
 
 const TABS = [
     { id: 'notes', label: '划线与批注' },
