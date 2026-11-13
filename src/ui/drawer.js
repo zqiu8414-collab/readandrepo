@@ -3,12 +3,12 @@
 // T43：按角色页默认跟随 ST 自己的角色排序，顶上小下拉可临时换（只在这次打开阅读器期间有效）；ST 标签筛选；名字搜索；
 // 几百个角色时只画看得见的几十行（虚拟滚动，行高固定）。收藏页只列"收藏的整个聊天"（D19），楼 / 候选收藏在右侧面板。
 
-import { getCurrentChatKey, listByCharacter, listByGroup, listRecent, parseChatKey, prefetchCurrentChat } from '../core/chatSource.js?v=0.3.1-self.5';
-import { isFavoriteChat, listFavoriteChats, loadFavoriteChats, onFavoriteChatsChange, toggleFavoriteChat } from './chatFavorites.js?v=0.3.1-self.5';
-import { h, iconButton } from './dom.js?v=0.3.1-self.5';
-import { filterOwners, formatListDate, matchesFilter, OWNER_SORTS, sortOwners } from './logic.js?v=0.3.1-self.5';
-import { loadOwners } from './ownerMeta.js?v=0.3.1-self.5';
-import { redactString } from './redact.js?v=0.3.1-self.5';
+import { getCurrentChatKey, listByCharacter, listByGroup, listRecent, parseChatKey, prefetchCurrentChat } from '../core/chatSource.js?v=0.3.1-self.6';
+import { isFavoriteChat, listFavoriteChats, loadFavoriteChats, onFavoriteChatsChange, toggleFavoriteChat } from './chatFavorites.js?v=0.3.1-self.6';
+import { h, iconButton } from './dom.js?v=0.3.1-self.6';
+import { filterOwners, formatListDate, matchesFilter, OWNER_SORTS, sortOwners } from './logic.js?v=0.3.1-self.6';
+import { loadOwners } from './ownerMeta.js?v=0.3.1-self.6';
+import { redactString } from './redact.js?v=0.3.1-self.6';
 
 const TABS = [
     { id: 'recent', icon: 'fa-clock', label: '最近' },

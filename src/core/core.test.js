@@ -1,8 +1,8 @@
 // ST Reader — AGPL-3.0
-import { createChatSource, makeChatKey, parseChatKey } from './chatSource.js?v=0.3.1-self.5';
-import { calculateDepths, normalizeDate, parseChatRows, toMessageModel } from './messageModel.js?v=0.3.1-self.5';
-import { collectScripts, isDisplayScript, runDisplayRegex, runLiteralRegex } from './regexPipeline.js?v=0.3.1-self.5';
-import { locateTextQuote, makeTextQuote, replaceLiteralNames, splitMaskedText } from './textTransforms.js?v=0.3.1-self.5';
+import { createChatSource, makeChatKey, parseChatKey } from './chatSource.js?v=0.3.1-self.6';
+import { calculateDepths, normalizeDate, parseChatRows, toMessageModel } from './messageModel.js?v=0.3.1-self.6';
+import { collectScripts, isDisplayScript, runDisplayRegex, runLiteralRegex } from './regexPipeline.js?v=0.3.1-self.6';
+import { locateTextQuote, makeTextQuote, replaceLiteralNames, splitMaskedText } from './textTransforms.js?v=0.3.1-self.6';
 
 function assert(condition, message = '断言失败') { if (!condition) throw new Error(message); }
 function equal(actual, expected) { assert(JSON.stringify(actual) === JSON.stringify(expected), `不相等：${JSON.stringify(actual)} / ${JSON.stringify(expected)}`); }

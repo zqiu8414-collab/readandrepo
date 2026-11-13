@@ -1,10 +1,10 @@
 // ST Reader — AGPL-3.0
-import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.5';
-import { createCssScope, refreshCssScope, startCssScope } from './cssScope.js?v=0.3.1-self.5';
-import { createStore } from './store.js?v=0.3.1-self.5';
-import { createAnchor, getAnchorText, relocateAnnotations, resolveAnchor } from './anchor.js?v=0.3.1-self.5';
-import { seedStore, TEST_CONTEXT, TEST_PNG } from './persistence.test.js?v=0.3.1-self.5';
-import { runDisplayRegex, runLiteralRegex } from './regexPipeline.js?v=0.3.1-self.5';
+import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.6';
+import { createCssScope, refreshCssScope, startCssScope } from './cssScope.js?v=0.3.1-self.6';
+import { createStore } from './store.js?v=0.3.1-self.6';
+import { createAnchor, getAnchorText, relocateAnnotations, resolveAnchor } from './anchor.js?v=0.3.1-self.6';
+import { seedStore, TEST_CONTEXT, TEST_PNG } from './persistence.test.js?v=0.3.1-self.6';
+import { runDisplayRegex, runLiteralRegex } from './regexPipeline.js?v=0.3.1-self.6';
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));

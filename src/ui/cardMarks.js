@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
 // readandrepo 修改：2026-11-08，分享卡片内的临时划线。仅修改预览副本，不写聊天或阅读批注。
-import { locateTextQuote, makeTextQuote } from '../core/textTransforms.js?v=0.3.1-self.5';
+import { locateTextQuote, makeTextQuote } from '../core/textTransforms.js?v=0.3.1-self.6';
 
 const PART = '[data-stcr-card-part]';
 const SKIP = 'style, script, template, button, textarea, svg, [data-stcr-ignore-anchor]';

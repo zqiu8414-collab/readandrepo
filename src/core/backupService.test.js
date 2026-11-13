@@ -1,10 +1,10 @@
 // ST Reader — AGPL-3.0
 // T70 / D33 自动备份的纯逻辑与服务流程。网络全部是内存替身（假的 user/files 目录），不发任何真实请求。
-import { createBackupService, dailyCandidates, dailyName, MAIN_FILE, planRotation, planSync, toBase64 } from './backupService.js?v=0.3.1-self.5';
-import { createHostSettings, hostBackedSettings } from './hostSettings.js?v=0.3.1-self.5';
-import { createStore, mergeNewer } from './store.js?v=0.3.1-self.5';
-import { memoryStorage, seedStore, TEST_CONTEXT } from './persistence.test.js?v=0.3.1-self.5';
-import { createTextAnchor } from './anchor.js?v=0.3.1-self.5';
+import { createBackupService, dailyCandidates, dailyName, MAIN_FILE, planRotation, planSync, toBase64 } from './backupService.js?v=0.3.1-self.6';
+import { createHostSettings, hostBackedSettings } from './hostSettings.js?v=0.3.1-self.6';
+import { createStore, mergeNewer } from './store.js?v=0.3.1-self.6';
+import { memoryStorage, seedStore, TEST_CONTEXT } from './persistence.test.js?v=0.3.1-self.6';
+import { createTextAnchor } from './anchor.js?v=0.3.1-self.6';
 
 const assert = (value, message = 'T70 断言失败') => { if (!value) throw new Error(message); };
 const equal = (a, b, label = '') => assert(JSON.stringify(a) === JSON.stringify(b), `${label}${JSON.stringify(a)} ≠ ${JSON.stringify(b)}`);

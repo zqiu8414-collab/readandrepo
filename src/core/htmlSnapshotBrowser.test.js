@@ -1,7 +1,7 @@
 // ST Reader — AGPL-3.0
-import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.5';
-import { createSandbox, renderStatic, exportRenderedHtml } from './htmlRenderer.js?v=0.3.1-self.5';
-import { transformHtmlOffline } from './codeTransforms.js?v=0.3.1-self.5';
+import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.6';
+import { createSandbox, renderStatic, exportRenderedHtml } from './htmlRenderer.js?v=0.3.1-self.6';
+import { transformHtmlOffline } from './codeTransforms.js?v=0.3.1-self.6';
 const assert = (ok, message) => { if (!ok) throw new Error(message); };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function rejects(run, pattern) { try { await run(); } catch (error) { if (!pattern || pattern.test(error.message)) return; throw error; } throw new Error('预期拒绝但成功'); }
@@ -48,7 +48,7 @@ export async function testHtmlSnapshotBrowser() {
             try {
                 const html = await handle.snapshot();
                 assert(!html.includes('绝不能带出'), '密码被带出');
-                const { maskHtmlString } = await import('./codeTransforms.js?v=0.3.1-self.5');
+                const { maskHtmlString } = await import('./codeTransforms.js?v=0.3.1-self.6');
                 await transformHtmlOffline(await maskHtmlString(html, { maskWords: ['虚构秘密'] }), doc => {
                     assert(!doc.querySelector('#name').textContent.includes('秘密') && !doc.querySelector('#note').textContent.includes('秘密'), '当前表单值绕过脱敏');
                     assert(doc.querySelector('#check').checked && doc.querySelector('#more').open, '表单状态丢失');
@@ -153,7 +153,7 @@ export async function testHtmlSnapshotBrowser() {
             try { assert(calls === 0 && !offline.document.querySelector('img,link'), '断网仍读取资源'); } finally { offline.destroy(); }
         });
         await test('外链字体内嵌并进入真实 PNG，与相同字体 data 版本像素一致', async () => {
-            const { readNyFontBlobs, toDataUrl } = await import('./cardFonts.js?v=0.3.1-self.5');
+            const { readNyFontBlobs, toDataUrl } = await import('./cardFonts.js?v=0.3.1-self.6');
             const entries = ctx.extensionSettings['Ny-font-manager']?.importedFonts?.filter(x => x.kind === 'file') ?? [];
             assert(entries.length, '先按 T14 在开发浏览器导入已有 Ny 合成字体');
             const [font] = await readNyFontBlobs(entries.slice(0, 1)); assert(font.blob instanceof Blob, '开发字体缺失');

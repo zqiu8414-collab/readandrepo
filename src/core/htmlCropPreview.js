@@ -1,5 +1,5 @@
 // ST Reader — AGPL-3.0
-import { previewPoint, dragCrop } from './htmlCrop.js?v=0.3.1-self.5';
+import { previewPoint, dragCrop } from './htmlCrop.js?v=0.3.1-self.6';
 
 /** 开发演示的自由裁剪预览。只接收已经脱敏的图片，不访问交互沙箱 DOM。 */
 export function createCropPreview(image, width, height, onChange) {

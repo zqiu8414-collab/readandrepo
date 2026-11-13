@@ -6,11 +6,11 @@
 // 片段一律是克隆出来的新节点：绝不把绑定过原文的楼层放进卡片，导出时用 replaceNames:false 不会还原真名。
 // 只读（D02）：只读 handle，不写聊天、不改候选。
 
-import { getAnchorText, locateAnchorText } from '../core/anchor.js?v=0.3.1-self.5';
-import { automaticNameRules, createCardMessage } from '../core/cardExport.js?v=0.3.1-self.5';
-import { renderMessage } from '../core/formatter.js?v=0.3.1-self.5';
-import { replaceLiteralNames } from '../core/textTransforms.js?v=0.3.1-self.5';
-import { alignTexts, isSystemLike, mapOffset } from './logic.js?v=0.3.1-self.5';
+import { getAnchorText, locateAnchorText } from '../core/anchor.js?v=0.3.1-self.6';
+import { automaticNameRules, createCardMessage } from '../core/cardExport.js?v=0.3.1-self.6';
+import { renderMessage } from '../core/formatter.js?v=0.3.1-self.6';
+import { replaceLiteralNames } from '../core/textTransforms.js?v=0.3.1-self.6';
+import { alignTexts, isSystemLike, mapOffset } from './logic.js?v=0.3.1-self.6';
 
 /** 思维链在前、正文在后，与楼层里的顺序一致。 */
 const PARTS = Object.freeze([['reasoning', '.mes_reasoning'], ['body', '.mes_text']]);
@@ -263,10 +263,16 @@ export async function buildPieces(handle, floors, options, cache) {
                     for (const at of ranges) {
                         const excerpt = cloneByOffsets(source, at.start, at.end, index);
                         if (!hasContent(excerpt)) continue;
-                        const block = source.ownerDocument.createElement('div');
-                        block.className = 'stcr-card-excerpt';
-                        block.append(excerpt);
-                        fragment.append(block);
+                        // 美化常排除 .mes_text [class] *，并用 > p / > blockquote 限定正文。
+                        // 不给选段增加祖先；间距是空的兄弟节点，不影响原元素命中主题规则。
+                        if (fragment.hasChildNodes()) {
+                            const gap = source.ownerDocument.createElement('div');
+                            gap.className = 'stcr-card-excerpt-gap';
+                            gap.setAttribute('aria-hidden', 'true');
+                            gap.setAttribute('data-stcr-ignore-anchor', '');
+                            fragment.append(gap);
+                        }
+                        fragment.append(excerpt);
                     }
                 }
                 if (part === 'body' && hasContent(fragment)) retainPieceStyles(source, fragment);

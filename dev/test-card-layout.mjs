@@ -70,9 +70,12 @@ try {
     for (let i = 0; !(await evaluate('Boolean(window.testReady)')); i++) {
         if (i > 50) throw new Error('合成页面加载超时'); await delay(100);
     }
-    const result = await evaluate(`import('/src/core/cardLayoutBrowser.test.js').then(module => module.testCardLayoutBrowser())`);
+    const excerpts = process.argv.includes('--excerpts');
+    const result = await evaluate(excerpts
+        ? `import('/src/ui/cardExcerptsBrowser.test.js').then(module => module.testCardExcerptsBrowser())`
+        : `import('/src/core/cardLayoutBrowser.test.js').then(module => module.testCardLayoutBrowser())`);
     console.log(JSON.stringify(result, null, 2));
-    console.log(`导出排版回归通过：${result.length} 项，使用真实 PNG 像素验证。`);
+    console.log(excerpts ? `多段美化回归通过：${result.length} 项，包含隔离副本和 PNG 生成。` : `导出排版回归通过：${result.length} 项，使用真实 PNG 像素验证。`);
 } finally {
     for (const call of calls.values()) clearTimeout(call.timer);
     socket?.close();

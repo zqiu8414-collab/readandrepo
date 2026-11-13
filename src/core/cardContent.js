@@ -1,9 +1,9 @@
 // ST Reader — AGPL-3.0
-import { initFormatter, formatWithStrategy } from './formatter.js?v=0.3.1-self.5';
-import { loadHostRuntime } from './hostRuntime.js?v=0.3.1-self.5';
-import { collectScripts, runDisplayRegex, PLACEMENT } from './regexPipeline.js?v=0.3.1-self.5';
-import { replaceNamesInRaw, maskText, normalizeMaskStyle, CARD_ICONS } from './cardTransforms.js?v=0.3.1-self.5';
-import { normalizeAssetImage, sanitizeSvg } from './assetCodec.js?v=0.3.1-self.5';
+import { initFormatter, formatWithStrategy } from './formatter.js?v=0.3.1-self.6';
+import { loadHostRuntime } from './hostRuntime.js?v=0.3.1-self.6';
+import { collectScripts, runDisplayRegex, PLACEMENT } from './regexPipeline.js?v=0.3.1-self.6';
+import { replaceNamesInRaw, maskText, normalizeMaskStyle, CARD_ICONS } from './cardTransforms.js?v=0.3.1-self.6';
+import { normalizeAssetImage, sanitizeSvg } from './assetCodec.js?v=0.3.1-self.6';
 
 const sources = new WeakMap();
 const skipped = 'style,script,template,button,textarea,[data-stcr-protected],[data-stcr-mask]';

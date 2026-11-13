@@ -1,8 +1,8 @@
 // ST Reader — AGPL-3.0
-import { collectScopedCss, rewriteChatSelector, scopeDeclarationValue } from './cssScope.js?v=0.3.1-self.5';
-import { createStore, bookmarkId } from './store.js?v=0.3.1-self.5';
-import { createTextAnchor, locateAnchorText } from './anchor.js?v=0.3.1-self.5';
-import { MAX_ASSET_BYTES } from './assetCodec.js?v=0.3.1-self.5';
+import { collectScopedCss, rewriteChatSelector, scopeDeclarationValue } from './cssScope.js?v=0.3.1-self.6';
+import { createStore, bookmarkId } from './store.js?v=0.3.1-self.6';
+import { createTextAnchor, locateAnchorText } from './anchor.js?v=0.3.1-self.6';
+import { MAX_ASSET_BYTES } from './assetCodec.js?v=0.3.1-self.6';
 
 // 用项目自己的 PNG/CRC 与 Node zlib 从零生成的两个 1×1 色块，不含外部素材。
 export const TEST_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==';

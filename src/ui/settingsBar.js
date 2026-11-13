@@ -6,9 +6,9 @@
 // ⋯ 里：排版、备份。T70 起自动备份到 ST 服务器；第一行是上次自动备份的时间与大小，第二行手动按钮。
 // 自动备份用不了、且有数据 14 天没导出时，Aa 上亮一个小点（只提醒，不弹窗）。
 
-import { h, iconButton } from './dom.js?v=0.3.1-self.5';
-import { effectivePrefs, PREF_LIMITS } from './logic.js?v=0.3.1-self.5';
-import { getPrefs, setPrefs } from './prefs.js?v=0.3.1-self.5';
+import { h, iconButton } from './dom.js?v=0.3.1-self.6';
+import { effectivePrefs, PREF_LIMITS } from './logic.js?v=0.3.1-self.6';
+import { getPrefs, setPrefs } from './prefs.js?v=0.3.1-self.6';
 
 /** 主题当前正文字号（px），用于显示"18"这样的绝对数。 */
 export function themeFontSize() {

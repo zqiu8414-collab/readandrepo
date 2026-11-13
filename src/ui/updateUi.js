@@ -3,15 +3,15 @@
 // 更新后第一次打开阅读器弹"本次更新了什么"。数据全走 core 的 updateService（03 §5.15）。
 // 检查 / 更新只在人类点按钮时发生（ST 会去 github.com 拉取本扩展的目录，不碰聊天）；绝不自动更新。
 
-import { checkUpdate, getChangelog, getLastSeenVersion, getVersion, markVersionSeen, runUpdate } from '../core/updateService.js?v=0.3.1-self.5';
-import { renderMarkdown, showGuide } from './docPanel.js?v=0.3.1-self.5';
-import { h } from './dom.js?v=0.3.1-self.5';
-import { getPrefs, setPrefs } from './prefs.js?v=0.3.1-self.5';
-import { RELEASE_VERSION } from '../core/releaseVersion.js?v=0.3.1-self.5';
+import { checkUpdate, getChangelog, getLastSeenVersion, getVersion, markVersionSeen, runUpdate } from '../core/updateService.js?v=0.3.1-self.6';
+import { renderMarkdown, showGuide } from './docPanel.js?v=0.3.1-self.6';
+import { h } from './dom.js?v=0.3.1-self.6';
+import { getPrefs, setPrefs } from './prefs.js?v=0.3.1-self.6';
+import { RELEASE_VERSION } from '../core/releaseVersion.js?v=0.3.1-self.6';
 
 /**
  * 设置里的版本一行。
- * @param {{docPanel:ReturnType<import('./docPanel.js?v=0.3.1-self.5').createDocPanel>}} opts
+ * @param {{docPanel:ReturnType<import('./docPanel.js?v=0.3.1-self.6').createDocPanel>}} opts
  */
 export function createVersionRow({ docPanel }) {
     const name = h('span', { class: 'stcr-ver-name', text: 'ST Reader' });
@@ -84,7 +84,7 @@ async function showChangelog(docPanel) {
  * 打开阅读器时调用：这个版本还没给人类看过 → 弹"本次更新了什么"。
  * 读不到版本 / 日志就安静地不弹（下次再试），不标记已读。
  * 已读记录为空（从没记过，例如从还没有这个功能的 0.1.0 升上来）也弹：更新的人正需要看到。
- * @param {ReturnType<import('./docPanel.js?v=0.3.1-self.5').createDocPanel>} docPanel
+ * @param {ReturnType<import('./docPanel.js?v=0.3.1-self.6').createDocPanel>} docPanel
  * @param {()=>boolean} stillOpen 阅读器还开着（异步读取期间可能被关掉）
  */
 export async function maybeShowWhatsNew(docPanel, stillOpen) {

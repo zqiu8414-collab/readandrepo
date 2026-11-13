@@ -1,7 +1,7 @@
 // ST Reader — AGPL-3.0
-import { parseChatKey } from './chatSource.js?v=0.3.1-self.5';
-import { MAX_ASSETS, normalizeAssetImage } from './assetCodec.js?v=0.3.1-self.5';
-import { validReplacementBackground } from './cardTransforms.js?v=0.3.1-self.5';
+import { parseChatKey } from './chatSource.js?v=0.3.1-self.6';
+import { MAX_ASSETS, normalizeAssetImage } from './assetCodec.js?v=0.3.1-self.6';
+import { validReplacementBackground } from './cardTransforms.js?v=0.3.1-self.6';
 
 const STATE_KEY = 'stcr:state:v1';
 const CATEGORIES = ['annotations', 'bookmarks', 'maskWords', 'settings', 'replaceRules', 'assets'];

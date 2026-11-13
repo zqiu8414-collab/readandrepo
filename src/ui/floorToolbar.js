@@ -3,12 +3,12 @@
 // 所有按钮只用 stcr- 自有类名，不用 .mes_button/.mes_edit/.swipe_right 等（避免触发 ST 委托事件）。
 // 切换候选只改阅读器视图，不写 ST（D02、02 §5）。
 
-import { renderMessage } from '../core/formatter.js?v=0.3.1-self.5';
-import { isDevInstance } from '../core/readonlyGuard.js?v=0.3.1-self.5';
-import { h, iconButton } from './dom.js?v=0.3.1-self.5';
-import { formatStamp, isSystemLike, reasoningTitle, RENDER_FAULT_MARK } from './logic.js?v=0.3.1-self.5';
-import { findHtmlBlocks } from './htmlBlocks.js?v=0.3.1-self.5';
-import { redactElement, visibleText } from './redact.js?v=0.3.1-self.5';
+import { renderMessage } from '../core/formatter.js?v=0.3.1-self.6';
+import { isDevInstance } from '../core/readonlyGuard.js?v=0.3.1-self.6';
+import { h, iconButton } from './dom.js?v=0.3.1-self.6';
+import { formatStamp, isSystemLike, reasoningTitle, RENDER_FAULT_MARK } from './logic.js?v=0.3.1-self.6';
+import { findHtmlBlocks } from './htmlBlocks.js?v=0.3.1-self.6';
+import { redactElement, visibleText } from './redact.js?v=0.3.1-self.6';
 
 /**
  * @typedef {object} FloorContext
@@ -16,7 +16,7 @@ import { redactElement, visibleText } from './redact.js?v=0.3.1-self.5';
  * @property {(model:object)=>string|null} avatarFor 头像地址；null 不显示
  * @property {(index:number)=>boolean} isReasoningOpen 这一楼的思维链此刻是否展开
  * @property {(index:number, swipe:number|null)=>boolean} isBookmarked 整楼（swipe=null）或某候选是否已收藏
- * @property {(model:object)=>import('./redact.js?v=0.3.1-self.5').RedactOptions|null} [redactFor] 脱敏显示开着时给这一楼的屏蔽词 / 规则（T45）
+ * @property {(model:object)=>import('./redact.js?v=0.3.1-self.6').RedactOptions|null} [redactFor] 脱敏显示开着时给这一楼的屏蔽词 / 规则（T45）
  * @property {(textEl:HTMLElement, blocks:object[], where:object)=>void} [attachHtml] 楼里有 HTML 时接上沙箱渲染（T44b）
  */
 

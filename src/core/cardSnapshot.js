@@ -1,9 +1,9 @@
 // ST Reader — AGPL-3.0
-import { CARD_ICONS } from './cardTransforms.js?v=0.3.1-self.5';
-import { rasterizeCardIcon } from './cardFonts.js?v=0.3.1-self.5';
-import { createResourceLoader } from './htmlExternalResources.js?v=0.3.1-self.5';
-import { cssDeclarations } from './cssDeclarations.js?v=0.3.1-self.5';
-import { checkCardDimensions, waitForExport } from './exportControl.js?v=0.3.1-self.5';
+import { CARD_ICONS } from './cardTransforms.js?v=0.3.1-self.6';
+import { rasterizeCardIcon } from './cardFonts.js?v=0.3.1-self.6';
+import { createResourceLoader } from './htmlExternalResources.js?v=0.3.1-self.6';
+import { cssDeclarations } from './cssDeclarations.js?v=0.3.1-self.6';
+import { checkCardDimensions, waitForExport } from './exportControl.js?v=0.3.1-self.6';
 
 const forbiddenTags = new Set(['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'BASE', 'META', 'FORM', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'AUDIO', 'VIDEO', 'SOURCE']);
 // T73：url() 不再整条丢弃——副本 CSP 只放行 data:，排版时不联网；最后由 embedCardImages 把卡片上真正用到的图片内嵌或换成占位。

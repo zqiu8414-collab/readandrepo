@@ -1,7 +1,7 @@
 // ST Reader — AGPL-3.0
 // D15/D16：交互文档永远不与宿主同源；不导入 ST 上下文或存储。
-import { removeNetworkResources } from './htmlResources.js?v=0.3.1-self.5';
-import { installSnapshotChannel } from './htmlSnapshot.js?v=0.3.1-self.5';
+import { removeNetworkResources } from './htmlResources.js?v=0.3.1-self.6';
+import { installSnapshotChannel } from './htmlSnapshot.js?v=0.3.1-self.6';
 const MAX_HEIGHT = 16384;
 export function htmlWidth(width = 390) {
     if (!Number.isInteger(width) || width < 1 || width > 8192) throw new RangeError('HTML 宽度须为 1–8192 的整数');
@@ -247,4 +247,4 @@ export function createSandbox(html, options = {}) {
     return handle;
 }
 
-export { renderStatic, exportRenderedHtml } from './htmlStatic.js?v=0.3.1-self.5';
+export { renderStatic, exportRenderedHtml } from './htmlStatic.js?v=0.3.1-self.6';

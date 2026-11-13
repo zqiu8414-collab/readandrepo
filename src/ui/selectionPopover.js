@@ -4,11 +4,11 @@
 // 全部挂在 #stcr_root 里（事件已在根节点截断，不会冒泡到 ST）。
 // "卡片"按钮（T23a）：可跨楼，跨楼时只有它能用。"屏蔽 ▾ → 设为替换词…"（T23b）：把这个词加进我的替换规则。
 
-import { store } from '../core/store.js?v=0.3.1-self.5';
-import { h, iconButton } from './dom.js?v=0.3.1-self.5';
-import { COLORS } from './marks.js?v=0.3.1-self.5';
-import { createRuleEditor, ruleScopes } from './rulesUi.js?v=0.3.1-self.5';
-import { redactString } from './redact.js?v=0.3.1-self.5';
+import { store } from '../core/store.js?v=0.3.1-self.6';
+import { h, iconButton } from './dom.js?v=0.3.1-self.6';
+import { COLORS } from './marks.js?v=0.3.1-self.6';
+import { createRuleEditor, ruleScopes } from './rulesUi.js?v=0.3.1-self.6';
+import { redactString } from './redact.js?v=0.3.1-self.6';
 
 const MASK_MAX = 30;
 

@@ -1,16 +1,16 @@
 // ST Reader — AGPL-3.0
 import { domToBlob } from '../../vendor/modern-screenshot.mjs';
-import { store } from './store.js?v=0.3.1-self.5';
-import { normalizeMaskStyle } from './cardTransforms.js?v=0.3.1-self.5';
-import { getCardSource, applyCardParts, renderCardParts, prepareCardAssets, maskTextNodesInPlace } from './cardContent.js?v=0.3.1-self.5';
-import { buildCardFontCss } from './cardFonts.js?v=0.3.1-self.5';
-import { createCardSnapshot, embedCardImages, finishCardSnapshot, measureCardSnapshot, waitForCardFonts } from './cardSnapshot.js?v=0.3.1-self.5';
-import { offlineCaptureGuard } from './offlineCapture.js?v=0.3.1-self.5';
-import { waitForExport } from './exportControl.js?v=0.3.1-self.5';
+import { store } from './store.js?v=0.3.1-self.6';
+import { normalizeMaskStyle } from './cardTransforms.js?v=0.3.1-self.6';
+import { getCardSource, applyCardParts, renderCardParts, prepareCardAssets, maskTextNodesInPlace } from './cardContent.js?v=0.3.1-self.6';
+import { buildCardFontCss } from './cardFonts.js?v=0.3.1-self.6';
+import { createCardSnapshot, embedCardImages, finishCardSnapshot, measureCardSnapshot, waitForCardFonts } from './cardSnapshot.js?v=0.3.1-self.6';
+import { offlineCaptureGuard } from './offlineCapture.js?v=0.3.1-self.6';
+import { waitForExport } from './exportControl.js?v=0.3.1-self.6';
 
-export { createCardMessage, bindCardSource, wrapMaskSpans } from './cardContent.js?v=0.3.1-self.5';
-export { replaceNamesInRaw, maskText, automaticNameRules, ruleWords } from './cardTransforms.js?v=0.3.1-self.5';
-export { maskCodeText, maskHtmlString } from './codeTransforms.js?v=0.3.1-self.5';
+export { createCardMessage, bindCardSource, wrapMaskSpans } from './cardContent.js?v=0.3.1-self.6';
+export { replaceNamesInRaw, maskText, automaticNameRules, ruleWords } from './cardTransforms.js?v=0.3.1-self.6';
+export { maskCodeText, maskHtmlString } from './codeTransforms.js?v=0.3.1-self.6';
 
 /**
  * 从已连接的预览节点生成 PNG。只在隔离副本重渲染、脱敏，不改输入 DOM。

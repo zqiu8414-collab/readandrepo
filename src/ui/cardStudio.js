@@ -8,20 +8,20 @@
 // T23b：我的替换规则（右侧"管理替换规则…"子页、预览里"总是替换为…"、映射列表每行可改）与我导入的图片
 // （小图案遮盖、替换图案、书摘封面）。规则与图片走 store.replaceRules / store.assets，随备份导出。
 
-import { exportCard, ruleWords, wrapMaskSpans } from '../core/cardExport.js?v=0.3.1-self.5';
-import { store } from '../core/store.js?v=0.3.1-self.5';
-import { getVersion } from '../core/updateService.js?v=0.3.1-self.5';
-import { waitForExport } from '../core/exportControl.js?v=0.3.1-self.5';
-import { buildPieces, createPieceCache, findThoughts, scrubNote } from './cardPieces.js?v=0.3.1-self.5';
-import { createCardMarks } from './cardMarks.js?v=0.3.1-self.5';
-import { captureEdits, restoreEdits, pushEditHistory, cardDraftKey, createCardDraftCache } from './cardDrafts.js?v=0.3.1-self.5';
-import { COLORS } from './marks.js?v=0.3.1-self.5';
-import { colorPicker, readableOn } from './colorPicker.js?v=0.3.1-self.5';
-import { getPrefs } from './prefs.js?v=0.3.1-self.5';
-import { copyText, h, iconButton } from './dom.js?v=0.3.1-self.5';
-import { scopeFloorStyles } from './floorToolbar.js?v=0.3.1-self.5';
-import { CARD_ICON_CHOICES, CARD_SIZES, cardExportReport, cardFileName, cleanHexColor, cleanMaskWord, normalizeCardPrefs, wordAt } from './logic.js?v=0.3.1-self.5';
-import { createRuleEditor, createRulesManager, importAsset, patternGlyph, patternPicker, ruleScopes, textTarget } from './rulesUi.js?v=0.3.1-self.5';
+import { exportCard, ruleWords, wrapMaskSpans } from '../core/cardExport.js?v=0.3.1-self.6';
+import { store } from '../core/store.js?v=0.3.1-self.6';
+import { getVersion } from '../core/updateService.js?v=0.3.1-self.6';
+import { waitForExport } from '../core/exportControl.js?v=0.3.1-self.6';
+import { buildPieces, createPieceCache, findThoughts, scrubNote } from './cardPieces.js?v=0.3.1-self.6';
+import { createCardMarks } from './cardMarks.js?v=0.3.1-self.6';
+import { captureEdits, restoreEdits, pushEditHistory, cardDraftKey, createCardDraftCache } from './cardDrafts.js?v=0.3.1-self.6';
+import { COLORS } from './marks.js?v=0.3.1-self.6';
+import { colorPicker, readableOn } from './colorPicker.js?v=0.3.1-self.6';
+import { getPrefs } from './prefs.js?v=0.3.1-self.6';
+import { copyText, h, iconButton } from './dom.js?v=0.3.1-self.6';
+import { scopeFloorStyles } from './floorToolbar.js?v=0.3.1-self.6';
+import { CARD_ICON_CHOICES, CARD_SIZES, cardExportReport, cardFileName, cleanHexColor, cleanMaskWord, normalizeCardPrefs, wordAt } from './logic.js?v=0.3.1-self.6';
+import { createRuleEditor, createRulesManager, importAsset, patternGlyph, patternPicker, ruleScopes, textTarget } from './rulesUi.js?v=0.3.1-self.6';
 
 const PREFS_KEY = 'stcr:ui:card:v1';
 /** 永久屏蔽词各自的遮盖样式（T23a 验收意见①）：{词: {mask, icon|asset|color}}；没有的词跟随默认。随备份导出。 */

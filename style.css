@@ -1669,8 +1669,7 @@
 #stcr_root .stcr-main > .stcr-scroll { top: var(--stcr-collection-height, 0px); }
 #stcr_root .stcr-main > .stcr-banner { margin-top: var(--stcr-collection-height, 0px); }
 #stcr_root .stcr-sel-pop--collect { flex-wrap: wrap; max-width: calc(100% - 16px); border-radius: 16px; }
-#stcr_root .stcr-card-excerpt { display: block; }
-#stcr_root .stcr-card-excerpt + .stcr-card-excerpt { margin-top: .75em; }
+#stcr_root .stcr-card-excerpt-gap { display: block; height: .75em; margin: 0; padding: 0; border: 0; }
 
 /* readandrepo：逐段检查与删除；列表占用自己的空间，不盖住正文。 */
 #stcr_root .stcr-collection-list {

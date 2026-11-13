@@ -1,7 +1,7 @@
 // ST Reader — AGPL-3.0
-import { parseChatKey } from './chatSource.js?v=0.3.1-self.5';
-import { locateTextQuote, makeTextQuote } from './textTransforms.js?v=0.3.1-self.5';
-import { store } from './store.js?v=0.3.1-self.5';
+import { parseChatKey } from './chatSource.js?v=0.3.1-self.6';
+import { locateTextQuote, makeTextQuote } from './textTransforms.js?v=0.3.1-self.6';
+import { store } from './store.js?v=0.3.1-self.6';
 
 const EXCLUDED = 'style,script,button,[data-stcr-ignore-anchor]';
 function validateContext({ chatKey, mesIndex, swipeIndex, part = 'body', rawText }) {

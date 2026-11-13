@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
-import { installReadonlyGuard, isDevInstance, isReadonlyGuardInstalled } from './src/core/readonlyGuard.js?v=0.3.1-self.5';
-import { createSelfTestRunner } from './src/core/selfTestRunner.js?v=0.3.1-self.5';
+import { installReadonlyGuard, isDevInstance, isReadonlyGuardInstalled } from './src/core/readonlyGuard.js?v=0.3.1-self.6';
+import { createSelfTestRunner } from './src/core/selfTestRunner.js?v=0.3.1-self.6';
 
 // ST Reader 入口。遵循 D02；数据与格式化已交付，阅读器界面由 T21 接入。
 // 在模块加载时立即启用保护，不等 APP_READY，避免留下初始化空窗。
@@ -10,58 +10,58 @@ if (isDevInstance(window.location)) {
     window.stcrSelfTest = createSelfTestRunner(async (options = {}) => {
         const runCore = options.core ?? (!options.fixtures && !options.performance && !options.cachePerformance);
         if (!isReadonlyGuardInstalled(window)) throw new Error('开发实例的 fetch 只读保护已失效。');
-        const { testReadonlyGuard } = await import('./src/core/readonlyGuard.test.js?v=0.3.1-self.5');
+        const { testReadonlyGuard } = await import('./src/core/readonlyGuard.test.js?v=0.3.1-self.6');
         const results = await testReadonlyGuard();
         if (runCore) {
-            const { testCoreLogic } = await import('./src/core/core.test.js?v=0.3.1-self.5');
-            const { testCoreBrowser } = await import('./src/core/coreBrowser.test.js?v=0.3.1-self.5');
+            const { testCoreLogic } = await import('./src/core/core.test.js?v=0.3.1-self.6');
+            const { testCoreBrowser } = await import('./src/core/coreBrowser.test.js?v=0.3.1-self.6');
             results.push(...await testCoreLogic(), ...await testCoreBrowser());
         }
         if (options.chatCache ?? (runCore || options.cachePerformance)) {
-            const { testChatCacheLogic } = await import('./src/core/chatCache.test.js?v=0.3.1-self.5');
-            const { testChatCacheBrowser } = await import('./src/core/chatCacheBrowser.test.js?v=0.3.1-self.5');
+            const { testChatCacheLogic } = await import('./src/core/chatCache.test.js?v=0.3.1-self.6');
+            const { testChatCacheBrowser } = await import('./src/core/chatCacheBrowser.test.js?v=0.3.1-self.6');
             results.push(...await testChatCacheLogic(), ...await testChatCacheBrowser({ performanceCheck: !!options.cachePerformance }));
         }
         if (options.persistence ?? runCore) {
-            const { testPersistenceLogic } = await import('./src/core/persistence.test.js?v=0.3.1-self.5');
-            const { testPersistenceBrowser } = await import('./src/core/persistenceBrowser.test.js?v=0.3.1-self.5');
+            const { testPersistenceLogic } = await import('./src/core/persistence.test.js?v=0.3.1-self.6');
+            const { testPersistenceBrowser } = await import('./src/core/persistenceBrowser.test.js?v=0.3.1-self.6');
             results.push(...await testPersistenceLogic(), ...await testPersistenceBrowser());
         }
         if (options.cardExport ?? runCore) {
-            const { testCardExportLogic } = await import('./src/core/cardExport.test.js?v=0.3.1-self.5');
-            const { testCardExportBrowser } = await import('./src/core/cardExportBrowser.test.js?v=0.3.1-self.5');
+            const { testCardExportLogic } = await import('./src/core/cardExport.test.js?v=0.3.1-self.6');
+            const { testCardExportBrowser } = await import('./src/core/cardExportBrowser.test.js?v=0.3.1-self.6');
             results.push(...await testCardExportLogic(), ...await testCardExportBrowser());
         }
         if (options.coreFixes ?? runCore) {
-            const { testCoreFixesLogic } = await import('./src/core/coreFixes.test.js?v=0.3.1-self.5');
-            const { testCoreFixesBrowser } = await import('./src/core/coreFixesBrowser.test.js?v=0.3.1-self.5');
+            const { testCoreFixesLogic } = await import('./src/core/coreFixes.test.js?v=0.3.1-self.6');
+            const { testCoreFixesBrowser } = await import('./src/core/coreFixesBrowser.test.js?v=0.3.1-self.6');
             results.push(...await testCoreFixesLogic(), ...await testCoreFixesBrowser());
         }
         if (options.htmlRenderer ?? runCore) {
-            const { testHtmlRendererLogic } = await import('./src/core/htmlRenderer.test.js?v=0.3.1-self.5');
-            const { testHtmlRendererBrowser } = await import('./src/core/htmlRendererBrowser.test.js?v=0.3.1-self.5');
+            const { testHtmlRendererLogic } = await import('./src/core/htmlRenderer.test.js?v=0.3.1-self.6');
+            const { testHtmlRendererBrowser } = await import('./src/core/htmlRendererBrowser.test.js?v=0.3.1-self.6');
             results.push(...testHtmlRendererLogic(), ...await testHtmlRendererBrowser());
         }
         if (options.htmlSnapshot ?? runCore) {
-            const { testHtmlSnapshotLogic } = await import('./src/core/htmlSnapshot.test.js?v=0.3.1-self.5');
-            const { testHtmlSnapshotBrowser } = await import('./src/core/htmlSnapshotBrowser.test.js?v=0.3.1-self.5');
+            const { testHtmlSnapshotLogic } = await import('./src/core/htmlSnapshot.test.js?v=0.3.1-self.6');
+            const { testHtmlSnapshotBrowser } = await import('./src/core/htmlSnapshotBrowser.test.js?v=0.3.1-self.6');
             results.push(...testHtmlSnapshotLogic(), ...await testHtmlSnapshotBrowser());
         }
         if (options.htmlHeight && !(options.htmlRenderer ?? runCore)) {
-            const { testHtmlHeightBrowser } = await import('./src/core/htmlHeightBrowser.test.js?v=0.3.1-self.5');
+            const { testHtmlHeightBrowser } = await import('./src/core/htmlHeightBrowser.test.js?v=0.3.1-self.6');
             results.push(...await testHtmlHeightBrowser());
         }
         if (options.updateService ?? runCore) {
-            const { testUpdateServiceLogic } = await import('./src/core/updateService.test.js?v=0.3.1-self.5');
-            const { testUpdateServiceBrowser } = await import('./src/core/updateServiceBrowser.test.js?v=0.3.1-self.5');
+            const { testUpdateServiceLogic } = await import('./src/core/updateService.test.js?v=0.3.1-self.6');
+            const { testUpdateServiceBrowser } = await import('./src/core/updateServiceBrowser.test.js?v=0.3.1-self.6');
             results.push(...await testUpdateServiceLogic(), ...await testUpdateServiceBrowser());
         }
         if (options.fixtures) {
-            const { testBrowserFixtures } = await import('./src/core/fixtureSelfTest.js?v=0.3.1-self.5');
+            const { testBrowserFixtures } = await import('./src/core/fixtureSelfTest.js?v=0.3.1-self.6');
             results.push(...await testBrowserFixtures(options));
         }
         if (options.performance) {
-            const { testPerformanceBrowser } = await import('./src/core/performanceBrowser.test.js?v=0.3.1-self.5');
+            const { testPerformanceBrowser } = await import('./src/core/performanceBrowser.test.js?v=0.3.1-self.6');
             results.push(...await testPerformanceBrowser());
         }
         console.table(results);
@@ -69,23 +69,23 @@ if (isDevInstance(window.location)) {
         return results;
     });
     window.stcrStorageProbe = async phase => {
-        const { testStorageProbe } = await import('./src/core/persistenceBrowser.test.js?v=0.3.1-self.5');
+        const { testStorageProbe } = await import('./src/core/persistenceBrowser.test.js?v=0.3.1-self.6');
         return testStorageProbe(phase);
     };
     window.stcrExportDemo = async () => {
-        const { showCardExportDemo } = await import('./src/core/cardExportBrowser.test.js?v=0.3.1-self.5');
+        const { showCardExportDemo } = await import('./src/core/cardExportBrowser.test.js?v=0.3.1-self.6');
         return showCardExportDemo();
     };
     window.stcrHtmlDemo = async () => {
-        const { showHtmlRendererDemo } = await import('./src/core/htmlRendererDemo.js?v=0.3.1-self.5');
+        const { showHtmlRendererDemo } = await import('./src/core/htmlRendererDemo.js?v=0.3.1-self.6');
         return showHtmlRendererDemo();
     };
     window.stcrHtmlBoundaryDemo = async () => {
-        const { showHtmlBoundaryDemo } = await import('./src/core/htmlBoundaryDemo.js?v=0.3.1-self.5');
+        const { showHtmlBoundaryDemo } = await import('./src/core/htmlBoundaryDemo.js?v=0.3.1-self.6');
         return showHtmlBoundaryDemo();
     };
     window.stcrUpdateDemo = async () => {
-        const { showUpdateServiceDemo } = await import('./src/core/updateServiceBrowser.test.js?v=0.3.1-self.5');
+        const { showUpdateServiceDemo } = await import('./src/core/updateServiceBrowser.test.js?v=0.3.1-self.6');
         return showUpdateServiceDemo();
     };
 }
@@ -97,28 +97,28 @@ export function stReaderActivate() {
 const { eventSource, event_types } = SillyTavern.getContext();
 eventSource.on(event_types.APP_READY, async () => {
     try {
-        const { initFormatter } = await import('./src/core/formatter.js?v=0.3.1-self.5');
+        const { initFormatter } = await import('./src/core/formatter.js?v=0.3.1-self.6');
         await initFormatter();
     } catch (error) { console.error('[st-reader] 格式化模块初始化失败：', error); }
     try {
-        const { startCssScope } = await import('./src/core/cssScope.js?v=0.3.1-self.5');
-        const { store } = await import('./src/core/store.js?v=0.3.1-self.5');
+        const { startCssScope } = await import('./src/core/cssScope.js?v=0.3.1-self.6');
+        const { store } = await import('./src/core/store.js?v=0.3.1-self.6');
         startCssScope(); await store.ready();
         console.log('[st-reader] T13 样式、存储与锚点模块已就绪。');
         // T70 / D33：自动备份到 ST 的 user/files/；启动时本地为空或落后就先从服务器合并回来（不阻塞入口挂载）
-        const { startBackup } = await import('./src/core/backupService.js?v=0.3.1-self.5');
+        const { startBackup } = await import('./src/core/backupService.js?v=0.3.1-self.6');
         startBackup().then(({ restored }) => { if (restored) console.log('[st-reader] 已从 ST 服务器恢复阅读器数据。'); });
     } catch (error) { console.error('[st-reader] 样式与存储初始化失败：', error); }
     try {
         // T71 / D34：只读订阅 ST 的消息 / 聊天事件，命中就作废对应聊天的内存缓存（回调里不碰 chat、不调保存）
-        const { watchHostChatEvents } = await import('./src/core/chatSource.js?v=0.3.1-self.5');
+        const { watchHostChatEvents } = await import('./src/core/chatSource.js?v=0.3.1-self.6');
         const stopChatEvents = watchHostChatEvents();
         window.addEventListener('pagehide', () => stopChatEvents(), { once: true });
     } catch (error) { console.error('[st-reader] 聊天事件订阅失败：', error); }
     // 界面入口：魔杖菜单、/reader。格式化失败也挂入口，打开时会再试一次并提示。
     try {
         // 入口和卡片界面依赖使用同一资源版本，避免更新后浏览器继续运行旧界面。
-        const { mountEntries } = await import('./src/ui/mount.js?v=0.3.1-self.5');
+        const { mountEntries } = await import('./src/ui/mount.js?v=0.3.1-self.6');
         mountEntries();
         console.log('[st-reader] 阅读器入口已挂载：魔杖菜单「阅读器」、/reader。');
     } catch (error) { console.error('[st-reader] 阅读器入口挂载失败：', error); }

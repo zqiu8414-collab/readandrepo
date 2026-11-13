@@ -4,8 +4,8 @@
 
 import { alignTexts, cardFileName, filterOwners, OWNER_SORTS, parseStDate, sortOwners, stOwnerSort, cleanHexColor, cleanMaskWord, COLOR_PRESETS, DEFAULT_CARD_PREFS, DEFAULT_PREFS, effectivePrefs, followPlacement, foldRuns, formatListDate, formatStamp, hiddenUserRuns, isFolded, isStHidden,
     isSystemLike, mapOffset, matchesFilter, normalizeCardPrefs, normalizePrefs, parseJumpInput, pickSwipe, previewLine, progressText, pruneProgress,
-    reasoningTitle, swipePreviews, wordAt, formatBytes, mirrorStatusText, restoreSummary, faultReport, cardExportReport } from './logic.js?v=0.3.1-self.5';
-import { hasRedaction, redactString, replacePieces, setRedactState } from './redact.js?v=0.3.1-self.5';
+    reasoningTitle, swipePreviews, wordAt, formatBytes, mirrorStatusText, restoreSummary, faultReport, cardExportReport } from './logic.js?v=0.3.1-self.6';
+import { hasRedaction, redactString, replacePieces, setRedactState } from './redact.js?v=0.3.1-self.6';
 
 const results = [];
 function check(name, fn) {

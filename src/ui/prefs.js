@@ -5,9 +5,9 @@
 // store 不可用（极少见）时退回 localStorage，保证能读能记。
 // T70 / D33："更新后提醒"开关另存一份到 ST 的 extension_settings（换浏览器、清站点数据也在），以那边为准。
 
-import { hostSettings } from '../core/hostSettings.js?v=0.3.1-self.5';
-import { store } from '../core/store.js?v=0.3.1-self.5';
-import { normalizePrefs, pruneProgress } from './logic.js?v=0.3.1-self.5';
+import { hostSettings } from '../core/hostSettings.js?v=0.3.1-self.6';
+import { store } from '../core/store.js?v=0.3.1-self.6';
+import { normalizePrefs, pruneProgress } from './logic.js?v=0.3.1-self.6';
 
 const PREFS_KEY = 'stcr:ui:prefs:v1';
 const PROGRESS_KEY = 'stcr:ui:progress:v1';

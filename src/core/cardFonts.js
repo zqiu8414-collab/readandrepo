@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
 // Ny 1.1.9 兼容层：只读现有 IndexedDB，不导入插件源码，不创建字体数据库。
-import { waitForExport } from './exportControl.js?v=0.3.1-self.5';
+import { waitForExport } from './exportControl.js?v=0.3.1-self.6';
 export const splitFontFamilies = value => (String(value).match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,]+/g) ?? [])
     .map(value => value.trim().replace(/^["']|["']$/g, '').toLowerCase());
 

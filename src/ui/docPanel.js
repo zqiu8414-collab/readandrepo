@@ -2,7 +2,7 @@
 // 阅读器里的"文档面板"（T54b 本次更新了什么、T55 使用说明共用）：叠在正文上的一张纸，标题 + 正文 + 底栏。
 // Markdown 用 ST 自带的 showdown 转 HTML、DOMPurify 清洗；不加载图片、不嵌入任何外部内容。
 
-import { h, iconButton } from './dom.js?v=0.3.1-self.5';
+import { h, iconButton } from './dom.js?v=0.3.1-self.6';
 
 /** Markdown → 清洗过的 HTML。链接一律新窗口打开，图片 / 媒体 / 脚本不留（文档里本来就不该有）。 */
 export function renderMarkdown(markdown) {

@@ -4,12 +4,12 @@
 // 这里是共用的零件：规则编辑框（工作台、预览点词、阅读器选中浮层三处用同一个）、图案选择条、导入图片、管理页。
 // 文字一律 textContent；图片只用 store 校验过的本地 data URL，不联网（NF3）。
 
-import { listCharacters, listGroups, parseChatKey } from '../core/chatSource.js?v=0.3.1-self.5';
-import { ruleWords } from '../core/cardExport.js?v=0.3.1-self.5';
-import { store } from '../core/store.js?v=0.3.1-self.5';
-import { colorPicker } from './colorPicker.js?v=0.3.1-self.5';
-import { h, iconButton } from './dom.js?v=0.3.1-self.5';
-import { CARD_ICON_CHOICES, cleanMaskWord } from './logic.js?v=0.3.1-self.5';
+import { listCharacters, listGroups, parseChatKey } from '../core/chatSource.js?v=0.3.1-self.6';
+import { ruleWords } from '../core/cardExport.js?v=0.3.1-self.6';
+import { store } from '../core/store.js?v=0.3.1-self.6';
+import { colorPicker } from './colorPicker.js?v=0.3.1-self.6';
+import { h, iconButton } from './dom.js?v=0.3.1-self.6';
+import { CARD_ICON_CHOICES, cleanMaskWord } from './logic.js?v=0.3.1-self.6';
 
 export const ICON_NAMES = Object.freeze({ 'fa-star': '星星', 'fa-heart': '爱心', 'fa-cat': '小猫', 'fa-cloud': '云朵', 'fa-moon': '月亮', 'fa-shield': '盾牌' });
 const MAX_BYTES = 200 * 1024;

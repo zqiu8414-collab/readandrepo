@@ -1,13 +1,13 @@
 // ST Reader — AGPL-3.0
-import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.5';
-import { exportCard, createCardMessage, bindCardSource, wrapMaskSpans } from './cardExport.js?v=0.3.1-self.5';
-import { maskTextNodesInPlace, prepareCardAssets } from './cardContent.js?v=0.3.1-self.5';
-import { buildCardFontCss, rasterizeCardIcon } from './cardFonts.js?v=0.3.1-self.5';
-import { CARD_ICONS } from './cardTransforms.js?v=0.3.1-self.5';
-import { makeChatKey, openChat } from './chatSource.js?v=0.3.1-self.5';
-import { refreshCssScope } from './cssScope.js?v=0.3.1-self.5';
-import { TEST_PNG } from './persistence.test.js?v=0.3.1-self.5';
-import { testCardLayoutBrowser } from './cardLayoutBrowser.test.js?v=0.3.1-self.5';
+import { foreignExtensionSettings } from './hostSettings.js?v=0.3.1-self.6';
+import { exportCard, createCardMessage, bindCardSource, wrapMaskSpans } from './cardExport.js?v=0.3.1-self.6';
+import { maskTextNodesInPlace, prepareCardAssets } from './cardContent.js?v=0.3.1-self.6';
+import { buildCardFontCss, rasterizeCardIcon } from './cardFonts.js?v=0.3.1-self.6';
+import { CARD_ICONS } from './cardTransforms.js?v=0.3.1-self.6';
+import { makeChatKey, openChat } from './chatSource.js?v=0.3.1-self.6';
+import { refreshCssScope } from './cssScope.js?v=0.3.1-self.6';
+import { TEST_PNG } from './persistence.test.js?v=0.3.1-self.6';
+import { testCardLayoutBrowser } from './cardLayoutBrowser.test.js?v=0.3.1-self.6';
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const cleanOptions = { rules: [], assets: [], maskWords: [], scale: 1 };

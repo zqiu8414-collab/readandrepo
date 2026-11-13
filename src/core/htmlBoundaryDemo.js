@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
-import { detectHtmlBlocks, createSandbox } from './htmlRenderer.js?v=0.3.1-self.5';
-import { initFormatter, formatWithStrategy } from './formatter.js?v=0.3.1-self.5';
+import { detectHtmlBlocks, createSandbox } from './htmlRenderer.js?v=0.3.1-self.6';
+import { initFormatter, formatWithStrategy } from './formatter.js?v=0.3.1-self.6';
 import { MIXED_HTML, MULTI_HTML } from '../../dev/fixtures/html.mjs';
 
 // 仅开发演示与浏览器自测使用；正式阅读器的区间接线交给 Opus，不修改其 DOM 或锚点。

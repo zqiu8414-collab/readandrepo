@@ -2,8 +2,8 @@
 // 导出 / 导入 JSON 备份（02 §1.8、F7/F8）。数据来自 T13 store.exportAll / previewImport / importAll（03 §5.5）。
 // 导出是浏览器本地生成文件（blob:），不发任何网络请求（NF3）。
 
-import { store } from '../core/store.js?v=0.3.1-self.5';
-import { h } from './dom.js?v=0.3.1-self.5';
+import { store } from '../core/store.js?v=0.3.1-self.6';
+import { h } from './dom.js?v=0.3.1-self.6';
 
 const LABELS = { annotations: '划线与批注', bookmarks: '收藏', maskWords: '屏蔽词', settings: '阅读设置与进度', replaceRules: '替换规则', assets: '图片' };
 const REMIND_DAYS = 14;

@@ -1,7 +1,7 @@
 // ST Reader — AGPL-3.0
-import { store } from './store.js?v=0.3.1-self.5';
-import { hostBackedSettings } from './hostSettings.js?v=0.3.1-self.5';
-import { RELEASE_VERSION } from './releaseVersion.js?v=0.3.1-self.5';
+import { store } from './store.js?v=0.3.1-self.6';
+import { hostBackedSettings } from './hostSettings.js?v=0.3.1-self.6';
+import { RELEASE_VERSION } from './releaseVersion.js?v=0.3.1-self.6';
 
 // 自用分支只检查、更新 readandrepo 安装，保留原阅读器的数据存储键。
 const EXTENSION_NAME = 'readandrepo';

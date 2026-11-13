@@ -4,10 +4,10 @@
 // 只有"有批注"的小角标是插进正文的元素，带 data-stcr-ignore-anchor，锚点文本会自动忽略它。
 // 只读（D02）：一切都存扩展自己的存储，不写聊天。
 
-import { createAnchor, resolveAnchor } from '../core/anchor.js?v=0.3.1-self.5';
-import { bookmarkId, store } from '../core/store.js?v=0.3.1-self.5';
-import { h } from './dom.js?v=0.3.1-self.5';
-import { previewLine } from './logic.js?v=0.3.1-self.5';
+import { createAnchor, resolveAnchor } from '../core/anchor.js?v=0.3.1-self.6';
+import { bookmarkId, store } from '../core/store.js?v=0.3.1-self.6';
+import { h } from './dom.js?v=0.3.1-self.6';
+import { previewLine } from './logic.js?v=0.3.1-self.6';
 
 export const COLORS = Object.freeze([
     { id: 'yellow', label: '黄' }, { id: 'green', label: '绿' }, { id: 'blue', label: '蓝' }, { id: 'pink', label: '粉' },

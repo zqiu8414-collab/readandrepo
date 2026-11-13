@@ -1,7 +1,7 @@
 // ST Reader — AGPL-3.0
 // readandrepo 修改：2026-11-07，离屏导出完整排版与末段实际像素回归。
-import { exportCard } from './cardExport.js?v=0.3.1-self.5';
-import { createCardSnapshot } from './cardSnapshot.js?v=0.3.1-self.5';
+import { exportCard } from './cardExport.js?v=0.3.1-self.6';
+import { createCardSnapshot } from './cardSnapshot.js?v=0.3.1-self.6';
 
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));

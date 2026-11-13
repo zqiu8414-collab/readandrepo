@@ -1,6 +1,6 @@
 // ST Reader — AGPL-3.0
-import { createSandbox, exportRenderedHtml } from './htmlRenderer.js?v=0.3.1-self.5';
-import { createCropPreview } from './htmlCropPreview.js?v=0.3.1-self.5';
+import { createSandbox, exportRenderedHtml } from './htmlRenderer.js?v=0.3.1-self.6';
+import { createCropPreview } from './htmlCropPreview.js?v=0.3.1-self.6';
 import { PHONE_HTML, GAME_HTML } from '../../dev/fixtures/html.mjs';
 
 // 仅由 localhost:8100 的开发入口加载；T44b 正式阅读器 UI 仍由 Opus 接线。

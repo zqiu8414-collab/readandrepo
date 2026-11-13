@@ -1,5 +1,5 @@
 // ST Reader — AGPL-3.0
-import { maskText, replaceNamesInRaw } from './cardTransforms.js?v=0.3.1-self.5';
+import { maskText, replaceNamesInRaw } from './cardTransforms.js?v=0.3.1-self.6';
 
 const textIcons = Object.freeze({ 'fa-star': '★', 'fa-heart': '♥', 'fa-cat': '🐈', 'fa-cloud': '☁', 'fa-moon': '☾', 'fa-shield': '🛡' });
 

@@ -8,14 +8,14 @@
 // I032（astra 交付 snapshot）：默认"当前画面"——打开窗口时从沙箱取一次当前 DOM（游戏结局、滚动位置、表单），之后宽度 / 清晰度 / 框选
 // 都用这一份，不会选的是甲、导出却是乙；也可以切回"初始画面"。D23：截图默认带上 HTML 引用的外链图片、字体、样式，失败逐项提示。
 
-import { exportRenderedHtml, renderStatic } from '../core/htmlRenderer.js?v=0.3.1-self.5';
-import { createCropPreview } from '../core/htmlCropPreview.js?v=0.3.1-self.5';
-import { store } from '../core/store.js?v=0.3.1-self.5';
-import { h, iconButton } from './dom.js?v=0.3.1-self.5';
-import { HTML_WIDTHS } from './htmlBlocks.js?v=0.3.1-self.5';
-import { cardFileName, cleanMaskWord } from './logic.js?v=0.3.1-self.5';
-import { getPrefs } from './prefs.js?v=0.3.1-self.5';
-import { createRulesManager } from './rulesUi.js?v=0.3.1-self.5';
+import { exportRenderedHtml, renderStatic } from '../core/htmlRenderer.js?v=0.3.1-self.6';
+import { createCropPreview } from '../core/htmlCropPreview.js?v=0.3.1-self.6';
+import { store } from '../core/store.js?v=0.3.1-self.6';
+import { h, iconButton } from './dom.js?v=0.3.1-self.6';
+import { HTML_WIDTHS } from './htmlBlocks.js?v=0.3.1-self.6';
+import { cardFileName, cleanMaskWord } from './logic.js?v=0.3.1-self.6';
+import { getPrefs } from './prefs.js?v=0.3.1-self.6';
+import { createRulesManager } from './rulesUi.js?v=0.3.1-self.6';
 
 const SCALES = [{ id: 1, label: '1 倍' }, { id: 2, label: '2 倍' }, { id: 3, label: '3 倍' }];
 

@@ -2,7 +2,7 @@
 import {
     FORBIDDEN_CHAT_PATHS, getForbiddenChatPath, installReadonlyGuard,
     isDevInstance, isReadonlyGuardInstalled,
-} from './readonlyGuard.js?v=0.3.1-self.5';
+} from './readonlyGuard.js?v=0.3.1-self.6';
 
 /**
  * Node 与浏览器共用的自测；全部请求只交给内存替身，不访问服务器。

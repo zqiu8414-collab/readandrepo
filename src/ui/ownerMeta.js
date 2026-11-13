@@ -5,8 +5,8 @@
 // 在 core 补上之前，这里**只读**宿主页面内存里 getContext() 已有的这几份数组（不发请求、不改任何值），
 // 名单本身仍以 core 的列表为准；读不到时排序字段为空、标签为空、排序退回 A-Z，页面照常能用。
 
-import { listCharacters, listGroups } from '../core/chatSource.js?v=0.3.1-self.5';
-import { stOwnerSort } from './logic.js?v=0.3.1-self.5';
+import { listCharacters, listGroups } from '../core/chatSource.js?v=0.3.1-self.6';
+import { stOwnerSort } from './logic.js?v=0.3.1-self.6';
 
 function hostContext() {
     try { return globalThis.SillyTavern?.getContext?.() ?? null; } catch { return null; }

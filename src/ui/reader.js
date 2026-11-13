@@ -3,31 +3,31 @@
 // 阅读器主控（T21/T22/T23a）：全屏覆盖层 #stcr_root、正文 #stcr_chat（D12）。
 // 只读（D02）：只调 03 §5 的读取接口；候选/思维链/进度/划线/收藏都是阅读器自己的状态，绝不写回 ST。
 
-import { getCurrentChatKey, openChat, parseChatKey } from '../core/chatSource.js?v=0.3.1-self.5';
-import { maskHtmlString } from '../core/cardExport.js?v=0.3.1-self.5';
-import { initFormatter } from '../core/formatter.js?v=0.3.1-self.5';
-import { store } from '../core/store.js?v=0.3.1-self.5';
-import { flushMirror, getMirrorStatus, mirrorNow, onMirrorStatus, restoreFromServer, whenStarted } from '../core/backupService.js?v=0.3.1-self.5';
-import { getVersion } from '../core/updateService.js?v=0.3.1-self.5';
-import { createPanel } from './annotationsPanel.js?v=0.3.1-self.5';
-import { backupStatus, describeStoreError, exportBackup, pickAndImport } from './backup.js?v=0.3.1-self.5';
-import { annotationToFloor, countCardSelections, createPieceCache, listCardSelections, MAX_CARD_FLOORS, mergeCardSelections, removeCardSelection, selectionToFloors, wholeFloor } from './cardPieces.js?v=0.3.1-self.5';
-import { createCardStudio } from './cardStudio.js?v=0.3.1-self.5';
-import { copyText, h, iconButton, isTypingTarget, toast } from './dom.js?v=0.3.1-self.5';
-import { isFavoriteChat, loadFavoriteChats, onFavoriteChatsChange, resetFavoriteChats, toggleFavoriteChat } from './chatFavorites.js?v=0.3.1-self.5';
-import { createDrawer } from './drawer.js?v=0.3.1-self.5';
-import { createHtmlManager } from './htmlBlocks.js?v=0.3.1-self.5';
-import { createHtmlShot } from './htmlShot.js?v=0.3.1-self.5';
-import { buildFloor, buildSwipeControl, fillFloor, floorFault, floorPlainText, syncBookmarkMarks } from './floorToolbar.js?v=0.3.1-self.5';
-import { effectivePrefs, faultReport, foldRuns, followPlacement, formatStamp, isFolded, mirrorStatusText, parseJumpInput, pickSwipe, progressText, restoreSummary, swipePreviews } from './logic.js?v=0.3.1-self.5';
-import { createMarks, highlightSupported } from './marks.js?v=0.3.1-self.5';
-import { flushProgress, getPrefs, getProgress, lastRead, loadPrefs, onPrefsChange, reloadPrefs, rememberSwipe, setPrefs, setReadPosition } from './prefs.js?v=0.3.1-self.5';
-import { createSelectionUi } from './selectionPopover.js?v=0.3.1-self.5';
-import { hasRedaction, redactString, setRedactState, visibleText } from './redact.js?v=0.3.1-self.5';
-import { createSettingsBar } from './settingsBar.js?v=0.3.1-self.5';
-import { createRulesManager } from './rulesUi.js?v=0.3.1-self.5';
-import { createDocPanel } from './docPanel.js?v=0.3.1-self.5';
-import { createVersionRow, maybeShowWhatsNew } from './updateUi.js?v=0.3.1-self.5';
+import { getCurrentChatKey, openChat, parseChatKey } from '../core/chatSource.js?v=0.3.1-self.6';
+import { maskHtmlString } from '../core/cardExport.js?v=0.3.1-self.6';
+import { initFormatter } from '../core/formatter.js?v=0.3.1-self.6';
+import { store } from '../core/store.js?v=0.3.1-self.6';
+import { flushMirror, getMirrorStatus, mirrorNow, onMirrorStatus, restoreFromServer, whenStarted } from '../core/backupService.js?v=0.3.1-self.6';
+import { getVersion } from '../core/updateService.js?v=0.3.1-self.6';
+import { createPanel } from './annotationsPanel.js?v=0.3.1-self.6';
+import { backupStatus, describeStoreError, exportBackup, pickAndImport } from './backup.js?v=0.3.1-self.6';
+import { annotationToFloor, countCardSelections, createPieceCache, listCardSelections, MAX_CARD_FLOORS, mergeCardSelections, removeCardSelection, selectionToFloors, wholeFloor } from './cardPieces.js?v=0.3.1-self.6';
+import { createCardStudio } from './cardStudio.js?v=0.3.1-self.6';
+import { copyText, h, iconButton, isTypingTarget, toast } from './dom.js?v=0.3.1-self.6';
+import { isFavoriteChat, loadFavoriteChats, onFavoriteChatsChange, resetFavoriteChats, toggleFavoriteChat } from './chatFavorites.js?v=0.3.1-self.6';
+import { createDrawer } from './drawer.js?v=0.3.1-self.6';
+import { createHtmlManager } from './htmlBlocks.js?v=0.3.1-self.6';
+import { createHtmlShot } from './htmlShot.js?v=0.3.1-self.6';
+import { buildFloor, buildSwipeControl, fillFloor, floorFault, floorPlainText, syncBookmarkMarks } from './floorToolbar.js?v=0.3.1-self.6';
+import { effectivePrefs, faultReport, foldRuns, followPlacement, formatStamp, isFolded, mirrorStatusText, parseJumpInput, pickSwipe, progressText, restoreSummary, swipePreviews } from './logic.js?v=0.3.1-self.6';
+import { createMarks, highlightSupported } from './marks.js?v=0.3.1-self.6';
+import { flushProgress, getPrefs, getProgress, lastRead, loadPrefs, onPrefsChange, reloadPrefs, rememberSwipe, setPrefs, setReadPosition } from './prefs.js?v=0.3.1-self.6';
+import { createSelectionUi } from './selectionPopover.js?v=0.3.1-self.6';
+import { hasRedaction, redactString, setRedactState, visibleText } from './redact.js?v=0.3.1-self.6';
+import { createSettingsBar } from './settingsBar.js?v=0.3.1-self.6';
+import { createRulesManager } from './rulesUi.js?v=0.3.1-self.6';
+import { createDocPanel } from './docPanel.js?v=0.3.1-self.6';
+import { createVersionRow, maybeShowWhatsNew } from './updateUi.js?v=0.3.1-self.6';
 
 const PAGE_SIZE = 30;      // 每批楼数，与 core 默认一致（03 §4.5）
 const MAX_PAGES = 4;       // DOM 里同时最多保留几批，其余释放（NF2）
@@ -1862,7 +1862,7 @@ function originalCode(code) {
 async function maskedCodeText(text, model) {
     const options = await htmlMaskOptions(S, model);
     if (!/<[a-z!][^>]*>/i.test(text)) {
-        const { maskCodeText } = await import('../core/cardExport.js?v=0.3.1-self.5');
+        const { maskCodeText } = await import('../core/cardExport.js?v=0.3.1-self.6');
         return maskCodeText(text, options);
     }
     const masked = await maskHtmlString(text, options);
